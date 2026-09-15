@@ -18,7 +18,7 @@ Application hybride Python/JavaScript qui :
 ## Stack technique
 
 | Domaine         | Techno                                                                    |
-| --------------- | -------------------------------------------------------------------------- |
+| --------------- | ------------------------------------------------------------------------- |
 | Data & ML       | Python, `nba_api`, `pandas`, `numpy`, `scikit-learn`, `xgboost`, `joblib` |
 | Back-End / API  | Python, FastAPI, uvicorn                                                  |
 | Base de données | PostgreSQL ou Supabase (pas encore branchée)                              |
@@ -36,46 +36,49 @@ nba-predictor/
 │   │   └── fetch_teams_stats.py    # pas encore développé
 │   ├── preprocessing/
 │   │   ├── clean_data.py           # FAIT
-│   │   └── feature_engineering.py  # FAIT — v3 (Pace/Net Rating, win_pct contexte, Elo)
+│   │   ├── feature_engineering.py  # FAIT — v3 (Pace/Net Rating, win_pct contexte, Elo), refactoré cette session
+│   │   ├── features_lib.py         # FAIT (nouveau, cette session) — logique Elo/rolling stats PARTAGÉE entre feature_engineering.py (batch) et predictor_service.py (live)
+│   │   └── team_state.py           # FAIT (nouveau, cette session) — construit team_state.json (état courant par équipe) à partir de games_clean.csv
 │   ├── models/
-│   │   ├── train_model.py          # FAIT — LogReg + XGBoost comparés
+│   │   ├── train_model.py          # FAIT — LogReg + XGBoost comparés ; sauvegarde désormais aussi feature_columns.json (cette session)
 │   │   ├── evaluate_model.py       # pas encore développé (séparé de train_model.py)
-│   │   └── saved_models/           # logreg_baseline.pkl, xgboost_v1.pkl (non versionnés)
+│   │   └── saved_models/           # logreg_baseline.pkl, xgboost_v1.pkl, feature_columns.json (non versionnés)
 │   ├── raw/                        # games_raw_all_seasons.csv, games_history.csv (non versionnés)
-│   ├── processed/                  # games_clean.csv, game_features.csv (non versionnés)
+│   ├── processed/                  # games_clean.csv, game_features.csv, team_state.json (non versionnés)
 │   ├── notebooks/
 │   └── requirements.txt            # à mettre à jour : ajouter xgboost, joblib
 │
-├── api/                            # Back-end FastAPI — EN COURS (inchangé cette session)
-│   ├── venv/                       # environnement virtuel Python (non versionné)
+├── api/                            # Back-end FastAPI — vraies prédictions branchées cette session
+│   ├── venv/                       # environnement virtuel Python (non versionné) — Python 3.14
 │   ├── app/
-│   │   ├── main.py                 # FAIT — endpoint /games/today avec données fake
+│   │   ├── main.py                 # FAIT (réécrit cette session) — squelette FastAPI + CORS, logique déportée dans routers/
 │   │   ├── core/
 │   │   │   ├── config.py           # à créer
 │   │   │   └── database.py         # à créer (connexion Supabase/Postgres)
 │   │   ├── models/                 # à créer (ORM SQLAlchemy)
 │   │   ├── schemas/                # à créer (schémas Pydantic)
-│   │   ├── routers/                # à créer (actuellement tout dans main.py)
-│   │   │   ├── games.py
-│   │   │   ├── predictions.py
-│   │   │   ├── teams.py
-│   │   │   └── players.py
+│   │   ├── routers/
+│   │   │   ├── games.py            # FAIT (cette session) — /games/today avec vraies prédictions XGBoost + paramètre ?date=
+│   │   │   ├── predictions.py      # à créer
+│   │   │   ├── teams.py            # à créer
+│   │   │   └── players.py          # à créer
 │   │   └── services/
-│   │       ├── predictor_service.py    # à créer — PROCHAINE ÉTAPE PRIORITAIRE
-│   │       └── nba_sync_service.py
+│   │       ├── predictor_service.py    # FAIT (cette session) — charge xgboost_v1.pkl + team_state.json, construit les features live et prédit
+│   │       ├── schedule_service.py     # FAIT (cette session) — calendrier du jour via nba_api ScoreboardV3
+│   │       └── nba_sync_service.py     # PAS FAIT — job prévu pour régénérer team_state.json quotidiennement (actuellement : relance manuelle de team_state.py)
 │   ├── tests/
-│   └── requirements.txt            # FAIT — fastapi, uvicorn installés
+│   └── requirements.txt            # À REGÉNÉRER cette session (pip freeze demandé après ajout de nba_api/pandas/xgboost/scikit-learn/joblib côté API — à confirmer que c'est fait)
 │
-├── front/                          # Next.js + Tailwind — EN COURS (inchangé cette session)
+├── front/                          # Next.js + Tailwind — INCHANGÉ cette session, ⚠️ à vérifier (voir "Point d'attention front" plus bas)
 │   ├── src/
 │   │   ├── app/
 │   │   │   ├── layout.js
 │   │   │   ├── page.js             # FAIT — affiche les matchs du jour (Server Component)
 │   │   │   └── globals.css
 │   │   ├── components/
-│   │   │   └── GameCard.jsx        # FAIT — carte d'affichage d'un match
+│   │   │   └── GameCard.jsx        # FAIT — carte d'affichage d'un match, PROBABLEMENT À ADAPTER (nouveau format de réponse, voir plus bas)
 │   │   ├── services/
-│   │   │   └── api.js              # FAIT — appel à l'API FastAPI (getTodayGames)
+│   │   │   └── api.js              # FAIT — appel à l'API FastAPI (getTodayGames), PROBABLEMENT À ADAPTER
 │   │   └── styles/
 │   ├── package.json
 │   └── tailwind.config.js
@@ -114,7 +117,7 @@ Ces choix conditionnent la structure du code, à respecter si on régénère ou 
 6. AUTOMATISATION (optionnel) → scheduler quotidien (cron / APScheduler)
 ```
 
-**État actuel du flux : les étapes 1 → 2 → 3 sont fonctionnelles et validées sur données réelles (7 saisons, 8 279 matchs). L'étape 3 → 4 (brancher le modèle entraîné dans l'API) N'EST PAS ENCORE FAITE : l'API sert toujours des données fake. Aucune base de données n'est encore connectée (les CSV font office de BDD pour l'instant).**
+**État actuel du flux : les étapes 1 → 2 → 3 → 4 sont fonctionnelles et validées (1→2→3 sur données réelles, 7 saisons, 8 279 matchs ; 4 testée via TestClient + mocks côté Claude, et confirmée fonctionnelle en conditions réelles côté utilisateur — API qui répond, calendrier NBA récupéré). `/games/today` sert désormais de VRAIES prédictions XGBoost, plus des données fake. Aucune base de données n'est encore connectée (les CSV + `team_state.json` font office de BDD pour l'instant). L'étape 5 (front) n'a pas été retouchée cette session et doit être vérifiée/adaptée au nouveau format de réponse de `/games/today` (voir "Point d'attention front" plus bas). L'étape 6 (automatisation) n'est toujours pas commencée : `team_state.json` doit pour l'instant être régénéré à la main (`python preprocessing/team_state.py`).**
 
 ## Schéma de base de données (cible, pas encore implémenté)
 
@@ -182,7 +185,7 @@ CREATE TABLE model_metrics (
 # Matchs
 GET  /games
 GET  /games/{game_id}
-GET  /games/today                # FAIT (données fake)
+GET  /games/today                # FAIT — vraies prédictions XGBoost (cette session). Paramètre optionnel ?date=YYYY-MM-DD (utile en intersaison / pour tester sur une date passée déjà en historique — voir limite dans "État de l'intégration API" plus bas)
 
 # Équipes
 GET  /teams
@@ -240,14 +243,106 @@ Réécrit en profondeur cette session, en 3 vagues successives :
 
 ### Résultats obtenus (progression au fil de la session, saison test 2025-26, 1 186 matchs)
 
-| Étape                                          | Accuracy LogReg | Accuracy XGBoost | Log loss (meilleur) |
-| ----------------------------------------------- | --------------- | ----------------- | -------------------- |
-| Baseline ("home gagne toujours")                | 55,1%           | —                  | —                     |
-| v1 (win_pct global, avg_pts_last5, rest_days)   | 66,75%          | 67,4%             | 0,605                 |
-| v3 sans Elo (+ Pace/Net Rating + win_pct_context)| 66,4%           | 67,6%             | 0,606                 |
-| **v3 + Elo + scaling LogReg (état final)**      | **68,6%**       | **69,6%**         | **0,596**             |
+| Étape                                             | Accuracy LogReg | Accuracy XGBoost | Log loss (meilleur) |
+| ------------------------------------------------- | --------------- | ---------------- | ------------------- |
+| Baseline ("home gagne toujours")                  | 55,1%           | —                | —                   |
+| v1 (win_pct global, avg_pts_last5, rest_days)     | 66,75%          | 67,4%            | 0,605               |
+| v3 sans Elo (+ Pace/Net Rating + win_pct_context) | 66,4%           | 67,6%            | 0,606               |
+| **v3 + Elo + scaling LogReg (état final)**        | **68,6%**       | **69,6%**        | **0,596**           |
 
 **Feature la plus importante dans les deux modèles : `diff_elo`** (loin devant `diff_win_pct`, qui était dominante avant l'ajout de l'Elo). `diff_net_rtg_last10` reste un signal solide en 2ᵉ position. `win_pct_context` apporte un complément modeste mais réel.
+
+## Intégration modèle → API (session courante)
+
+Objectif de la session : remplacer les données fake de `/games/today` par de vraies prédictions XGBoost. **Fait, testé, validé en conditions réelles.**
+
+### `data/preprocessing/features_lib.py` (nouveau)
+
+Extraction de toute la logique Elo + rolling stats/win% de `feature_engineering.py` vers un module partagé, pour que l'entraînement (batch, tout l'historique) et la prédiction (live, un seul match) utilisent EXACTEMENT les mêmes formules — sans ce module, un ajustement de fenêtre ou de formule Elo fait un jour dans `feature_engineering.py` pourrait dériver silencieusement de ce qu'utilise l'API.
+
+- `elo_update()`, `elo_expected_home()`, `elo_mov_multiplier()` : fonctions pures, un match à la fois.
+- `compute_elo_timeline()` : passe séquentielle sur tout l'historique (utilisée par `feature_engineering.py`), renvoie aussi l'état Elo final par équipe.
+- `elo_for_target_season()` : version légère de la régression inter-saison, ne nécessite QUE le rating courant + sa saison de référence (pas tout l'historique) — c'est ce qu'utilise `predictor_service.py` à partir de `team_state.json`.
+- `rolling_mean_last_n()`, `win_pct()`, `rest_days()`, `net_rtg_from_boxscore()` : fonctions pures réutilisables en live.
+- Non-régression vérifiée : refactoring de `compute_elo_ratings()` dans `feature_engineering.py` donnant un écart de `0.0000000000` avec l'implémentation originale sur un jeu de test synthétique (cas limites inclus : ligne corrompue, nouvelle équipe, changement de saison) — puis confirmé sur les vraies données (8 279 matchs) : accuracies inchangées (68,6 %/69,6 %).
+
+### `data/preprocessing/team_state.py` (nouveau)
+
+Construit `data/processed/team_state.json` à partir de `games_clean.csv` : un instantané de l'état COURANT de chaque équipe (Elo, jusqu'à 10 derniers matchs avec boxscore, résultats de la saison en cours dom/ext/global, date du dernier match). C'est le pont entre le pipeline batch (qui a besoin de tout l'historique) et l'API (qui n'a besoin que de l'état actuel pour prédire un match à venir) — évite de recharger/retraiter 8000+ matchs à chaque requête.
+
+- ⚠️ **`team_state.json` n'est PAS un instantané historique par date** : il ne contient que l'état le plus récent. Interroger `/games/today?date=` avec une date passée utilise donc l'Elo/la forme ACTUELS des équipes, pas ceux réels à cette date passée — utile pour un test bout-en-bout, pas pour un vrai backtest historique.
+- À régénérer manuellement pour l'instant : `python preprocessing/team_state.py` (voir `nba_sync_service.py`, pas encore fait, pour l'automatisation).
+- Testé et confirmé sur les vraies données : 30 équipes traitées, saison `2025-26` correctement détectée.
+
+### `data/models/train_model.py` (modifié)
+
+Sauvegarde désormais `data/models/saved_models/feature_columns.json` (liste ordonnée des colonnes utilisées à l'entraînement) en plus des `.pkl`. Nécessaire car XGBoost est strict sur l'ordre/les noms de colonnes : sans ce fichier, `predictor_service.py` devrait deviner ou recopier à la main l'ordre des features, avec un risque de désynchronisation silencieuse (prédiction fausse sans erreur visible).
+
+### `api/app/services/predictor_service.py` (nouveau)
+
+Cœur de l'intégration. Charge le modèle + `team_state.json` + `feature_columns.json` une seule fois (pas à chaque requête). Pour un match `home_team_id` vs `away_team_id` :
+
+1. Récupère l'état des deux équipes dans `team_state.json`.
+2. Construit les 31 features exactement comme à l'entraînement, via `features_lib.py`.
+3. Gère les `None`/NaN nativement (XGBoost les supporte) plutôt que d'imputer une valeur arbitraire — utile en tout début de saison (moins de 5-10 matchs joués).
+4. Retourne probabilités de victoire + un score approximatif (**heuristique simple** basée sur forme offensive/défensive récente — le modèle ne fait QUE classifier victoire/défaite, il n'est pas entraîné à prédire un score).
+
+- Erreurs distinguées : `PredictorNotReadyError` (modèle/fichiers absents) et `UnknownTeamError` (équipe absente de `team_state.json`, ex. nouvelle franchise) — jamais un plantage silencieux.
+- Testé avec de vrais `team_id` (Boston Celtics vs Denver Nuggets) : 64,3 % de proba pour Boston à domicile, cohérent avec un Elo plus élevé (1710 vs 1604) et une meilleure forme récente.
+
+### `api/app/services/schedule_service.py` (nouveau)
+
+Récupère le calendrier des matchs du jour (ce qui manquait totalement : aucun collecteur ne s'occupait des matchs À VENIR, seulement de l'historique). Utilise `ScoreboardV3` de `stats.nba.com`, PAS l'endpoint "live" de `cdn.nba.com` :
+
+- `cdn.nba.com` s'est révélé **géobloqué depuis le réseau de l'IUT** de l'utilisateur (Access Denied Akamai) — probablement une restriction liée aux droits de diffusion.
+- `stats.nba.com` est le domaine déjà utilisé avec succès par `fetch_games.py` sur ce même réseau — pas de nouvelle dépendance réseau fragile.
+- `ScoreboardV2` a été écarté également : explicitement déprécié par `nba_api` pour la saison 2025-26 (bug connu sur les scores en début de saison, signalé par les mainteneurs eux-mêmes), qui recommandent `ScoreboardV3`.
+- Lit le JSON brut (`get_dict()`) plutôt que les DataFrames de l'endpoint : `homeTeam`/`awayTeam` y sont labellisés explicitement, plus robuste qu'une déduction par ordre d'insertion depuis le dataset `LineScore`.
+
+### `api/app/routers/games.py` + `api/app/main.py` (nouveaux)
+
+`main.py` : squelette FastAPI minimal (CORS pour `localhost:3000`, inclusion du routeur). `games.py` : combine `schedule_service` + `predictor_service`, avec gestion d'erreurs distinguée (400 date mal formée, 502 calendrier NBA indisponible, 503 modèle non prêt) — un match avec une équipe inconnue de `team_state.json` renvoie `prediction: null` pour ce match plutôt que de faire échouer tout l'endpoint.
+
+Réponse de `/games/today` :
+
+```json
+{
+  "date": "2026-09-15",
+  "count": 1,
+  "games": [
+    {
+      "game_id": "...",
+      "game_time_utc": "...",
+      "status": "...",
+      "home_team": {"id": ..., "name": "...", "tricode": "..."},
+      "away_team": {"id": ..., "name": "...", "tricode": "..."},
+      "prediction": {
+        "home_win_probability": 0.643,
+        "away_win_probability": 0.357,
+        "predicted_winner": "home",
+        "predicted_home_score": 115.9,
+        "predicted_away_score": 112.3
+      }
+    }
+  ]
+}
+```
+
+**Aucune donnée fake n'a été vue/documentée pour l'ancien `main.py`** (le fichier n'existait plus/n'a pas pu être fourni en session) : ce schéma de réponse est donc une conception NOUVELLE, pas une reprise de l'existant.
+
+### Point d'attention front (À FAIRE, potentiellement bloquant)
+
+`front/src/services/api.js` et `front/src/components/GameCard.jsx` n'ont PAS été retouchés cette session, et le format de réponse ci-dessus est probablement différent de celui que `main.py` renvoyait avant (données fake, format inconnu). **Il faut vérifier/adapter le front à ce nouveau format avant de considérer le tuyau front↔API↔modèle complet.**
+
+### Validation effectuée
+
+- Non-régression Elo (refactoring `features_lib.py`) : testée sur données synthétiques ET sur les 8 279 matchs réels (accuracies identiques : 68,6 %/69,6 %).
+- `team_state.py` : testé sur données synthétiques puis confirmé sur les vraies données (30 équipes, saison détectée correctement).
+- `predictor_service.py` : testé end-to-end (modèle jouet + `team_state.json` synthétique), PUIS confirmé avec un vrai match (Celtics vs Nuggets, résultat cohérent).
+- Routeur `/games/today` : 6 scénarios testés via `TestClient` + mocks (match normal, équipe inconnue, panne réseau simulée, modèle non chargeable, date invalide, date valide) — tous passent.
+- Test réel côté utilisateur : API démarrée avec `uvicorn`, `/games/today` répond correctement (`count: 0` car intersaison — normal, la saison régulière démarre mi-octobre).
+- **Non testé par Claude** : l'appel réseau réel à `nba_api`/`stats.nba.com` (sandbox Claude sans accès à ce domaine) — validé uniquement côté utilisateur.
+- **Non testé du tout** : `/games/today` avec de VRAIS matchs programmés (impossible avant le retour de la saison régulière, mi-octobre 2026). Le paramètre `?date=` permet un test partiel avec des team_id réels dès maintenant, mais avec la limite de `team_state.json` évoquée plus haut (pas d'historique par date).
 
 ## Ce qui a été fait jusqu'à présent (chronologie)
 
@@ -266,16 +361,28 @@ Réécrit en profondeur cette session, en 3 vagues successives :
    - **Ajout d'un système de rating Elo par équipe** (le levier le plus efficace de la session) : +2 points d'accuracy XGBoost.
    - StandardScaler sur la régression logistique pour corriger le déséquilibre d'échelle introduit par l'Elo.
    - Résultat final : **68,6% (LogReg) / 69,6% (XGBoost)**, contre 66,75% en début de session.
+9. **Session intégration modèle → API (cette session)** :
+   - `features_lib.py` créé : Elo + rolling stats/win% extraits en module partagé entraînement/prédiction, non-régression vérifiée (écart 0.0 avec l'ancienne implémentation, données réelles incluses).
+   - `team_state.py` créé : génère `team_state.json` (état courant des 30 équipes) à partir de `games_clean.csv`.
+   - `train_model.py` modifié : sauvegarde `feature_columns.json` (ordre des colonnes) à côté des `.pkl`.
+   - `predictor_service.py` créé : prédictions XGBoost réelles à partir de `team_state.json`, testé avec de vrais `team_id` (Celtics vs Nuggets).
+   - `schedule_service.py` créé : récupération du calendrier du jour via `nba_api` — deux itérations (endpoint "live" cdn.nba.com abandonné car géobloqué depuis le réseau IUT ; `ScoreboardV2` abandonné car déprécié par `nba_api` pour 2025-26 ; `ScoreboardV3` retenu).
+   - `main.py` + `routers/games.py` créés : `/games/today` sert désormais de vraies prédictions, avec gestion d'erreurs distinguée (400/502/503) et paramètre `?date=` optionnel.
+   - Plusieurs allers-retours de correction de faux positifs Pylance (typage `Scalar`/`ExtensionArray` de pandas, attribut `Optional` mal inféré) — aucun n'était un bug d'exécution réel.
+   - Validé en conditions réelles côté utilisateur : API démarrée, `/games/today` répond correctement (intersaison → `count: 0`, normal).
+   - **Non fait cette session** : adaptation du front au nouveau format de réponse, BDD, `nba_sync_service.py` (régénération auto de `team_state.json`), `requirements.txt` de `api/` pas confirmé regénéré.
 
 ## Prochaines étapes (à faire)
 
-1. **PRIORITAIRE — Intégration modèle → API** : créer `predictor_service.py`, charger `xgboost_v1.pkl` (meilleur modèle actuellement), remplacer les données fake de `/games/today` par de vraies prédictions. Nécessite de recalculer les features en direct pour les matchs à venir (pas seulement à partir de l'historique déjà en CSV) — probablement le point le plus délicat de cette étape.
-2. **Choix et setup de la BDD** : décider entre PostgreSQL local ou Supabase, créer les tables du schéma (à mettre à jour avec les vraies colonnes : Elo, Net Rating, win_pct_context...).
-3. **Refactor API** : sortir la logique de `main.py` vers les `routers/` dédiés (`games.py`, `predictions.py`, etc.).
-4. (Optionnel) Poursuivre l'optimisation ML si le temps le permet : tuning XGBoost (GridSearch/early stopping), validation croisée temporelle multi-saisons pour vérifier la robustesse du gain Elo (actuellement mesuré sur une seule saison de test), affiner le calcul du Net Rating (ratio de sommes plutôt que moyenne de ratios, pour réduire le bruit).
-5. (Optionnel) Dockeriser l'API et le service data (`infra/docker-compose.yml`).
-6. (Optionnel) Scheduler quotidien pour automatiser la collecte + régénération des prédictions.
-7. Mettre à jour `data/requirements.txt` avec `xgboost` et `joblib` (installés en session mais pas encore figés dans le fichier).
+1. **PRIORITAIRE — Adapter le front au nouveau format de `/games/today`** : `api.js` (`getTodayGames`) et `GameCard.jsx` n'ont pas été retouchés cette session ; le format de réponse documenté ci-dessus (`date`/`count`/`games[].prediction`) est probablement différent de ce qu'ils attendaient avec les données fake. À vérifier/adapter en premier pour avoir un tuyau complet front↔API↔modèle.
+2. **Choix et setup de la BDD** : décider entre PostgreSQL local ou Supabase, créer les tables du schéma (à mettre à jour avec les vraies colonnes : Elo, Net Rating, win_pct_context...). `team_state.json` fait office de solution transitoire correcte pour l'instant.
+3. **`nba_sync_service.py`** : automatiser la régénération quotidienne de `team_state.json` (actuellement : relance manuelle de `team_state.py`). Rendrait aussi possible un `POST /admin/sync/games` fonctionnel (actuellement juste dans la liste cible des endpoints, pas implémenté).
+4. **Finir le refactor API** : `routers/predictions.py`, `routers/teams.py`, `routers/players.py` sont toujours des fichiers vides — seul `routers/games.py` a une vraie logique pour l'instant.
+5. **Confirmer/finaliser `api/requirements.txt`** : `nba_api`, `pandas`, `numpy`, `joblib`, `xgboost`, `scikit-learn` ont été installés dans le venv de l'API cette session (nécessaires à `predictor_service.py`/`schedule_service.py`, qui tournent dans le processus API, pas juste dans `data/`) — à confirmer que `pip freeze > requirements.txt` a bien été relancé après coup.
+6. Tester `/games/today` avec de VRAIS matchs programmés dès le retour de la saison régulière NBA (mi-octobre 2026) — jusque-là, seul le paramètre `?date=` permet un test partiel (voir limite `team_state.json` plus haut).
+7. (Optionnel) Poursuivre l'optimisation ML si le temps le permet : tuning XGBoost (GridSearch/early stopping), validation croisée temporelle multi-saisons pour vérifier la robustesse du gain Elo (actuellement mesuré sur une seule saison de test), affiner le calcul du Net Rating (ratio de sommes plutôt que moyenne de ratios, pour réduire le bruit). Amélioration possible aussi sur le score approximatif prédit (actuellement une heuristique simple, pas un vrai modèle de régression).
+8. (Optionnel) Dockeriser l'API et le service data (`infra/docker-compose.yml`).
+9. Mettre à jour `data/requirements.txt` avec `xgboost` et `joblib` (toujours en attente depuis le début du projet — pas traité cette session, qui portait sur `api/`).
 
 ## Comment relancer le projet en local
 
@@ -284,10 +391,14 @@ Réécrit en profondeur cette session, en 3 vagues successives :
 ```powershell
 cd api
 .\venv\Scripts\Activate.ps1
-uvicorn app.main:app --reload --app-dir .
+uvicorn app.main:app --reload
 ```
 
 → `http://127.0.0.1:8000/docs`
+
+⚠️ Le venv doit être ACTIVÉ (`(venv)` visible dans le prompt) avant de lancer `uvicorn`, sinon `uvicorn` n'est pas trouvé (confondu avec un Python global qui n'a pas les dépendances). Si `Activate.ps1` est bloqué par la politique d'exécution PowerShell : `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`.
+
+⚠️ Le venv de `api/` a SES PROPRES dépendances, distinctes de `data/` : `predictor_service.py` et `schedule_service.py` tournent dans le processus API et ont donc besoin de `pandas`, `numpy`, `joblib`, `xgboost`, `scikit-learn`, `nba_api` installés DANS `api/venv`, pas seulement dans l'environnement utilisé pour `data/`.
 
 **Terminal 2 — Front :**
 
@@ -306,4 +417,5 @@ python collectors\fetch_games.py          # réutilise le brut existant si prés
 python preprocessing\clean_data.py
 python preprocessing\feature_engineering.py
 python models\train_model.py
+python preprocessing\team_state.py        # génère team_state.json — À REFAIRE après tout changement de games_clean.csv, l'API le lit directement
 ```

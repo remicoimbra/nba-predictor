@@ -60,24 +60,23 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from features_lib import (
+    BOX_SCORE_COLS,
+    FORM_WINDOW,
+    ROLLING_WINDOWS,
+    compute_elo_timeline,
+)
+
 PROCESSED_DIR = Path(__file__).resolve().parent.parent / "processed"
 INPUT_PATH = PROCESSED_DIR / "games_clean.csv"
 OUTPUT_PATH = PROCESSED_DIR / "game_features.csv"
 
-ROLLING_WINDOWS = [5, 10]
-FORM_WINDOW = 10  # fenêtre pour le win_pct "forme récente"
-
-# --- Configuration Elo ---
-# Valeurs standards façon FiveThirtyEight, adaptées à la NBA :
-ELO_INITIAL = 1500.0
-ELO_K = 20.0              # vitesse d'ajustement du rating après un match
-ELO_HOME_ADVANTAGE = 100  # bonus (en points d'Elo) accordé à l'équipe qui reçoit
-ELO_SEASON_REGRESSION = 0.25  # part de régression vers la moyenne entre 2 saisons
-
-# Colonnes de boxscore nécessaires pour estimer Pace / Net Rating.
-# Si absentes (ancien games_clean.csv généré avant la mise à jour de
-# fetch_games.py), on désactive simplement les features avancées.
-BOX_SCORE_COLS = ["fga", "fta", "oreb", "tov"]
+# NOTE : ROLLING_WINDOWS, FORM_WINDOW, BOX_SCORE_COLS et toute la logique
+# Elo (constantes + formule de mise à jour) vivent maintenant dans
+# features_lib.py, partagé avec predictor_service.py (calcul des features
+# "en direct" pour un match à venir). Ne plus dupliquer ces valeurs ici :
+# toute modification de fenêtre ou de formule Elo doit se faire dans
+# features_lib.py pour rester synchronisée entre entraînement et prédiction.
 
 
 def load_clean(path: Path) -> pd.DataFrame:
@@ -211,109 +210,20 @@ def add_rolling_features(long_df: pd.DataFrame, with_box_score: bool) -> pd.Data
 
 def compute_elo_ratings(df_games: pd.DataFrame) -> pd.DataFrame:
     """
-    Calcule un rating Elo par équipe, mis à jour match après match dans
-    l'ordre chronologique global (contrairement aux autres features, qui
-    se calculent équipe par équipe indépendamment, l'Elo doit être traité
-    de façon strictement séquentielle car un match met à jour les DEUX
-    équipes en même temps).
+    Calcule le rating Elo pré-match de chaque équipe (home_elo/away_elo),
+    pour l'entraînement.
 
-    Contrairement à win_pct, l'Elo tient compte de la force de
-    l'adversaire : battre une équipe forte fait gagner plus de points
-    qu'battre une équipe faible, et l'inverse pour une défaite.
+    La logique de calcul (formule Elo, MOV, régression inter-saison) vit
+    désormais dans features_lib.compute_elo_timeline(), partagée avec
+    predictor_service.py. Ici on ne garde que l'adaptation au format
+    attendu par le reste du pipeline batch (1 ligne par match).
 
-    Fuite temporelle : on enregistre le rating de chaque équipe AVANT le
-    match (home_elo/away_elo), puis on met à jour APRÈS avoir enregistré,
-    donc le modèle ne voit jamais le résultat du match courant à travers
-    son propre Elo.
-
-    Rating initial : ELO_INITIAL pour toute nouvelle équipe.
-    Mise à jour : formule Elo classique + multiplicateur d'écart de score
-    (MOV, façon FiveThirtyEight) : une victoire large ajuste plus le
-    rating qu'une victoire d'un point, mais l'effet est amorti quand
-    l'écart de rating pré-match était déjà favorable (une grosse équipe
-    qui écrase une petite n'est pas "surprenante").
-    Entre 2 saisons : régression partielle vers la moyenne (ELO_SEASON_REGRESSION),
-    pour refléter les mouvements d'effectif l'été sans perdre toute la
-    mémoire de la saison précédente.
+    Fuite temporelle : compute_elo_timeline() enregistre le rating de
+    chaque équipe AVANT le match, donc le modèle ne voit jamais le
+    résultat du match courant à travers son propre Elo.
     """
-    df = df_games.sort_values(["game_date", "nba_game_id"]).reset_index(drop=True).copy()
-
-    # Cast explicite : on ne veut pas dépendre du dtype tel qu'il arrive de
-    # games_clean.csv (objet/string possible selon la version du fichier).
-    # Sans ça, `row.home_score - row.away_score` peut lever un TypeError
-    # ("unsupported operand type(s) for -: 'str' and 'str'") si une des
-    # deux colonnes n'est pas numérique.
-    df["home_score"] = pd.to_numeric(df["home_score"], errors="coerce")
-    df["away_score"] = pd.to_numeric(df["away_score"], errors="coerce")
-    df["home_win"] = pd.to_numeric(df["home_win"], errors="coerce")
-
-    n_bad = df[["home_score", "away_score", "home_win"]].isna().any(axis=1).sum()
-    if n_bad:
-        print(f"[WARN] {n_bad} matchs avec score/résultat non numérique -> ignorés pour l'Elo (rating inchangé)")
-
-    # On extrait les colonnes en tableaux numpy typés (float64/object) avant
-    # la boucle plutôt que d'itérer avec itertuples(). itertuples() type
-    # chaque valeur en "Scalar" générique (str | bytes | date | complex | ...)
-    # aux yeux d'un vérificateur de type statique (Pylance/Pyright), ce qui
-    # déclenche des faux positifs sur les opérations arithmétiques même
-    # quand le dtype réel est numérique. Les tableaux numpy ont un dtype
-    # concret (float64 ici, grâce au to_numeric plus haut), donc plus
-    # d'ambiguïté de type, et c'est aussi plus rapide qu'itertuples.
-    seasons = df["season"].to_numpy()
-    home_ids = df["home_team_id"].to_numpy()
-    away_ids = df["away_team_id"].to_numpy()
-    home_scores = df["home_score"].to_numpy(dtype=float)
-    away_scores = df["away_score"].to_numpy(dtype=float)
-    home_wins = df["home_win"].to_numpy(dtype=float)
-
-    elo = {}
-    current_season = None
-    home_elo_pre = []
-    away_elo_pre = []
-
-    for i in range(len(df)):
-        season = seasons[i]
-        home_id = home_ids[i]
-        away_id = away_ids[i]
-
-        if season != current_season:
-            if current_season is not None:
-                for team_id in elo:
-                    elo[team_id] = ELO_INITIAL + (1 - ELO_SEASON_REGRESSION) * (elo[team_id] - ELO_INITIAL)
-            current_season = season
-
-        r_home = elo.get(home_id, ELO_INITIAL)
-        r_away = elo.get(away_id, ELO_INITIAL)
-
-        home_elo_pre.append(r_home)
-        away_elo_pre.append(r_away)
-
-        home_score = home_scores[i]
-        away_score = away_scores[i]
-        home_win = home_wins[i]
-
-        if np.isnan(home_score) or np.isnan(away_score) or np.isnan(home_win):
-            # Ligne corrompue : on garde le rating pré-match tel quel (déjà
-            # enregistré ci-dessus) mais on ne met à jour ni home_team_id
-            # ni away_team_id, faute de résultat exploitable.
-            continue
-
-        # Probabilité de victoire attendue pour l'équipe à domicile (avantage du terrain inclus).
-        expected_home = 1 / (1 + 10 ** (-((r_home + ELO_HOME_ADVANTAGE) - r_away) / 400))
-        actual_home = 1.0 if home_win == 1 else 0.0
-
-        margin = abs(home_score - away_score)
-        elo_diff_for_winner = (r_home + ELO_HOME_ADVANTAGE - r_away) if actual_home == 1.0 else (r_away - (r_home + ELO_HOME_ADVANTAGE))
-        mov_multiplier = ((margin + 3) ** 0.8) / (7.5 + 0.006 * max(elo_diff_for_winner, 0))
-
-        delta = ELO_K * mov_multiplier * (actual_home - expected_home)
-        elo[home_id] = r_home + delta
-        elo[away_id] = r_away - delta
-
-    df = df.copy()
-    df["home_elo"] = home_elo_pre
-    df["away_elo"] = away_elo_pre
-    return df[["nba_game_id", "home_elo", "away_elo"]]
+    timeline = compute_elo_timeline(df_games)
+    return timeline.per_game
 
 
 def back_to_wide(df_games: pd.DataFrame, long_df: pd.DataFrame, with_box_score: bool) -> pd.DataFrame:

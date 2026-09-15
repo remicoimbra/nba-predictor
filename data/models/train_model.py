@@ -16,6 +16,7 @@ Usage :
     python models/train_model.py
 """
 
+import json
 from pathlib import Path
 
 import joblib
@@ -179,7 +180,19 @@ def main():
 
     joblib.dump(logreg, MODEL_DIR / "logreg_baseline.pkl")
     joblib.dump(xgb, MODEL_DIR / "xgboost_v1.pkl")
+
+    # Sauvegarde de l'ordre exact des features utilisées à l'entraînement.
+    # XGBoost (et le pipeline scaler+logreg) sont sensibles à l'ordre des
+    # colonnes : un DataFrame de prédiction construit dans un ordre
+    # différent peut donner un résultat silencieusement faux. En figeant
+    # cette liste ici, predictor_service.py n'a jamais à deviner ou à
+    # recopier `FEATURE_PATTERNS` à la main (source de désynchronisation
+    # si on ajoute une feature plus tard sans mettre à jour les deux côtés).
+    with open(MODEL_DIR / "feature_columns.json", "w", encoding="utf-8") as f:
+        json.dump(feature_cols, f, indent=2)
+
     print(f"\nModèles sauvegardés dans : {MODEL_DIR}")
+    print(f"Ordre des features sauvegardé : {MODEL_DIR / 'feature_columns.json'}")
 
 
 if __name__ == "__main__":

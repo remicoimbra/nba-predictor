@@ -1,40 +1,41 @@
+"""
+main.py
+
+Point d'entrée FastAPI. Garde volontairement peu de logique ici : la
+logique métier vit dans app/services/, les endpoints dans app/routers/
+(cf. CLAUDE.md, refactor prévu : "sortir la logique de main.py vers les
+routers dédiés"). Comme il n'y avait pas de main.py existant à reprendre,
+celui-ci part directement sur cette structure cible plutôt que de repasser
+par une étape intermédiaire "tout dans main.py".
+
+Lancement (depuis api/) :
+    uvicorn app.main:app --reload
+"""
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.routers import games
+
 app = FastAPI(title="NBA Predictor API")
 
-# Autorise le front (localhost:3000) à appeler l'API
+# Le front (Next.js, localhost:3000 en dev) tourne sur une origine
+# différente de l'API (localhost:8000) : sans CORS explicite, le
+# navigateur bloque les requêtes fetch() de api.js malgré un serveur qui
+# répond correctement (à ne pas confondre avec une vraie erreur 4xx/5xx
+# lors du débogage : dans les DevTools, une erreur CORS apparaît comme un
+# échec réseau, pas comme une réponse HTTP visible).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-@app.get("/")
-def read_root():
-    return {"status": "API en ligne"}
+app.include_router(games.router)
 
-@app.get("/games/today")
-def get_today_games():
-    # Données fake en attendant nba_api
-    return [
-        {
-            "id": 1,
-            "home_team": "Los Angeles Lakers",
-            "away_team": "Boston Celtics",
-            "predicted_winner": "Los Angeles Lakers",
-            "win_probability": 0.62,
-            "predicted_home_score": 108,
-            "predicted_away_score": 102,
-        },
-        {
-            "id": 2,
-            "home_team": "Golden State Warriors",
-            "away_team": "Denver Nuggets",
-            "predicted_winner": "Denver Nuggets",
-            "win_probability": 0.55,
-            "predicted_home_score": 99,
-            "predicted_away_score": 104,
-        },
-    ]
+
+@app.get("/")
+def root():
+    return {"status": "ok", "service": "nba-predictor-api"}
