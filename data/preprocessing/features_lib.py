@@ -164,10 +164,32 @@ def compute_elo_timeline(df_games: pd.DataFrame) -> EloTimeline:
     return EloTimeline(per_game=per_game, final_state=elo, final_season=current_season)
 
 
+def season_for_date(game_date) -> str:
+    """
+    Saison NBA (format "2025-26", comme la colonne `season` de
+    games_clean.csv) à laquelle appartient une date. La saison régulière
+    démarre en octobre : toute date à partir d'août est rattachée à la
+    saison qui commence cette année-là (l'intersaison sert de frontière).
+    """
+    ts = pd.Timestamp(game_date)
+    start_year = ts.year if ts.month >= 8 else ts.year - 1
+    return f"{start_year}-{(start_year + 1) % 100:02d}"
+
+
+def is_later_season(target_season, last_known_season) -> bool:
+    """
+    True si `target_season` est postérieure à `last_known_season`. Le
+    format "YYYY-YY" se compare correctement en tant que chaîne.
+    """
+    return last_known_season is not None and str(target_season) > str(last_known_season)
+
+
 def elo_for_target_season(rating: float, last_known_season, target_season) -> float:
     """
     Applique la régression inter-saison à un rating Elo courant si la
-    saison cible diffère de la dernière saison connue.
+    saison cible est POSTÉRIEURE à la dernière saison connue (même règle
+    que compute_elo_timeline() : régression au passage à une nouvelle
+    saison, jamais en remontant le temps).
 
     Version "légère" de current_elo_for_prediction() : ne nécessite pas un
     EloTimeline complet (donc pas tout l'historique des matchs), juste le
@@ -175,7 +197,7 @@ def elo_for_target_season(rating: float, last_known_season, target_season) -> fl
     lit depuis team_state.json (qui ne contient que l'état courant, pas
     l'historique complet).
     """
-    if last_known_season is not None and target_season != last_known_season:
+    if is_later_season(target_season, last_known_season):
         return ELO_INITIAL + (1 - ELO_SEASON_REGRESSION) * (rating - ELO_INITIAL)
     return rating
 

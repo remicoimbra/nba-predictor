@@ -12,6 +12,11 @@ __pycache__/
 data/models/saved_models/*
 !data/models/saved_models/.gitkeep
 
+# Données générées par le pipeline (volumineuses, régénérables via data/)
+data/raw/
+data/processed/
+data/notebooks/*.csv
+
 # Notebooks — checkpoints Jupyter
 .ipynb_checkpoints/
 

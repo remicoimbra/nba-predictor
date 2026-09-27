@@ -1,0 +1,12 @@
+# Dépendances du pipeline data/ (collecte, features, entraînement).
+#
+# IMPORTANT : scikit-learn, xgboost et joblib doivent rester aux MÊMES
+# versions que dans api/requirements.txt — les modèles .pkl produits ici
+# sont rechargés par l'API, et un écart de version peut casser le
+# chargement (ou changer silencieusement le comportement du modèle).
+nba_api==1.11.4
+pandas==3.0.5
+numpy==2.5.3
+scikit-learn==1.9.1
+xgboost==3.4.1
+joblib==1.6.0

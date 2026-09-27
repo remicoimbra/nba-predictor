@@ -11,8 +11,8 @@ qui a besoin de l'état COURANT de chaque équipe pour PRÉDIRE un match à
 venir). Sans ce fichier, predictor_service.py devrait recharger et
 retraiter tout l'historique (8000+ matchs) à chaque requête.
 
-Ce module est appelé par nba_sync_service.py (job de synchro quotidien),
-mais est autonome et exécutable seul :
+Ce module est destiné à être appelé par nba_sync_service.py (job de synchro
+quotidien, pas encore implémenté), mais est autonome et exécutable seul :
 
 Usage :
     cd data

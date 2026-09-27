@@ -52,9 +52,11 @@ from features_lib import (  # type: ignore[import-not-found]  # noqa: E402
     FORM_WINDOW,
     ROLLING_WINDOWS,
     elo_for_target_season,
+    is_later_season,
     net_rtg_from_boxscore,
     rest_days,
     rolling_mean_last_n,
+    season_for_date,
     win_pct,
 )
 
@@ -184,17 +186,29 @@ class PredictorService:
         # ligne corrompue) : à exclure des moyennes glissantes.
         net_rtg_series = [v for v in net_rtg_series if v is not None]
 
-        target_season = self._team_state["as_of"]["season"]
+        # Saison du match à prédire, déduite de SA date (pas de celle de
+        # team_state.json) : si le match tombe dans une saison postérieure,
+        # on reproduit ce que fait le pipeline d'entraînement au changement
+        # de saison — régression Elo vers la moyenne ET remise à zéro de
+        # win_pct/win_pct_context (calculés par saison dans
+        # feature_engineering.py). win_pct_last10 et les moyennes glissantes
+        # ne sont pas remis à zéro, comme à l'entraînement.
+        known_season = self._team_state["as_of"]["season"]
+        target_season = season_for_date(as_of_date)
         elo = elo_for_target_season(
             rating=team["elo"],
-            last_known_season=self._team_state["as_of"]["season"],
+            last_known_season=known_season,
             target_season=target_season,
         )
 
-        context_results = team["season_results"]["home" if is_home else "away"]
+        if is_later_season(target_season, known_season):
+            season_results = {"all": [], "home": [], "away": []}
+        else:
+            season_results = team["season_results"]
+        context_results = season_results["home" if is_home else "away"]
 
         features = {
-            "win_pct": win_pct(team["season_results"]["all"]),
+            "win_pct": win_pct(season_results["all"]),
             "win_pct_context": win_pct(context_results),
             "win_pct_last10": win_pct(wins_recent[-FORM_WINDOW:]),
             "rest_days": rest_days(team["last_game_date"], as_of_date),
@@ -257,7 +271,12 @@ class PredictorService:
                 "features_lib.py et feature_columns.json ont probablement divergé."
             )
 
-        X = pd.DataFrame([[row[c] for c in self._feature_columns]], columns=self._feature_columns)
+        # astype(float) : convertit les None en NaN. Sans ça, une colonne
+        # dont la seule valeur est None est typée "object" et XGBoost refuse
+        # le DataFrame (cas réel : win_pct en tout début de saison).
+        X = pd.DataFrame(
+            [[row[c] for c in self._feature_columns]], columns=self._feature_columns
+        ).astype(float)
 
         proba = self._model.predict_proba(X)[0]
         home_win_proba = float(proba[1])
