@@ -1,26 +1,132 @@
 @import "tailwindcss";
 
+/*
+ * Palette NBA : bleu / blanc / rouge en clair, bleu / noir / rouge en sombre.
+ *
+ * Chaque couleur est déclarée UNE fois avec light-dark(clair, sombre) : la
+ * valeur retenue suit `color-scheme`, donc le thème système marche sans JS,
+ * et le bouton de thème n'a qu'à poser data-theme="light" | "dark" sur <html>.
+ *
+ * Contrastes : tout texte >= 7:1 (WCAG AAA) sur --bg, --surface et
+ * --surface-2 ; marques graphiques et bordures d'éléments >= 3:1.
+ * Vérifié par `npm run check:contrast` (scripts/check-contrast.mjs lit ce
+ * fichier) : relancer après toute modification d'une couleur.
+ *
+ * Le rouge NBA officiel (#C8102E, 5,9:1 sur blanc) ne passe pas en texte
+ * AAA : il est réservé aux marques graphiques et aplats décoratifs,
+ * --danger-text sert pour le texte rouge.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light dark;
+
+  --bg: light-dark(#ffffff, #060a16);
+  --surface: light-dark(#f3f5fa, #0e1630);
+  --surface-2: light-dark(#e4e9f4, #18234a);
+  --line: light-dark(#d3daea, #26335e); /* séparateurs, grilles (décoratif) */
+  --line-strong: light-dark(#5f6b8c, #8190c0); /* bordures de contrôles, >= 3:1 */
+
+  --text: light-dark(#0b1533, #f4f6ff);
+  --text-2: light-dark(#33405f, #c5cde3);
+
+  --accent: light-dark(#1d428a, #a9c1ff); /* bleu NBA : liens, boutons, texte */
+  --on-accent: light-dark(#ffffff, #060a16);
+  --danger-text: light-dark(#920a23, #ffa3ae);
+  --brand-red: light-dark(#c8102e, #e0243f); /* décoratif uniquement */
+
+  /* Séries des graphiques : domicile = bleu, extérieur = rouge.
+     Validées (bande de luminosité, daltonisme, contraste) avec le
+     validateur du skill dataviz, contre la surface de chaque thème. */
+  --home: light-dark(#2352b0, #5b82f0);
+  --away: light-dark(#c8102e, #f0485e);
+  --home-wash: light-dark(#dfe7f7, #16244f);
+  --away-wash: light-dark(#f8e0e4, #3a1424);
+
+  --focus: light-dark(#1d428a, #a9c1ff);
+  --shadow: light-dark(0 1px 2px rgb(11 21 51 / 0.06), 0 1px 2px rgb(0 0 0 / 0.4));
+  --shadow-lg: light-dark(0 12px 32px -12px rgb(11 21 51 / 0.25), 0 12px 32px -12px rgb(0 0 0 / 0.7));
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-text: var(--text);
+  --color-text-2: var(--text-2);
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --color-danger-text: var(--danger-text);
+  --color-brand-red: var(--brand-red);
+  --color-home: var(--home);
+  --color-away: var(--away);
+  --color-home-wash: var(--home-wash);
+  --color-away-wash: var(--away-wash);
+  --color-focus: var(--focus);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-barlow), var(--font-inter), ui-sans-serif, sans-serif;
+
+  --shadow-card: var(--shadow);
+  --shadow-pop: var(--shadow-lg);
+
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@keyframes shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
   }
 }
 
+html {
+  background: var(--bg);
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* Focus clavier toujours visible, même couleur dans tous les composants. */
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  animation: var(--animate-shimmer);
+}
+
+/* Les animations motion sont coupées par <MotionConfig reducedMotion="user">
+   et useChartTransition() ; ceci couvre les transitions/animations CSS. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
