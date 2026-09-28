@@ -17,7 +17,7 @@ from app.services.predictor_service import (
     UnknownTeamError,
     get_predictor_service,
 )
-from app.services.schedule_service import ScheduledGame, get_todays_games
+from app.services.schedule_service import ScheduledGame, ScheduleNotCoveredError, get_todays_games
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,7 @@ def _serialize_game(game: ScheduledGame, as_of_date) -> dict:
         "game_id": game.game_id,
         "game_time_utc": game.game_time_utc,
         "status": game.status,
+        "season_type": game.season_type,
         "home_team": {"id": game.home_team.id, "name": game.home_team.name, "tricode": game.home_team.tricode},
         "away_team": {"id": game.away_team.id, "name": game.away_team.name, "tricode": game.away_team.tricode},
         "prediction": None,
@@ -84,6 +85,8 @@ def get_today_games(
     - PredictorNotReadyError (modèle/team_state absent) -> 503, le service
       n'est pas mal utilisé, il n'est juste pas prêt (déploiement
       incomplet) : le front peut réessayer plus tard sans changer sa requête.
+    - Date absente de schedule.json, repli en direct désactivé (VPS) -> 404 :
+      la requête est valide, mais cette date n'a jamais été synchronisée.
     - Erreur réseau nba_api (scoreboard indisponible) -> 502, la source de
       données externe est en cause, pas notre API elle-même.
     """
@@ -104,6 +107,8 @@ def get_today_games(
 
     try:
         games = get_todays_games(target_date)
+    except ScheduleNotCoveredError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.exception("Échec de récupération du calendrier NBA pour %s", target_date)
         raise HTTPException(status_code=502, detail=f"Calendrier NBA indisponible : {e}")

@@ -23,6 +23,7 @@ forme d'il y a plusieurs jours.
 """
 
 import json
+import logging
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,6 +61,8 @@ from features_lib import (  # type: ignore[import-not-found]  # noqa: E402
     win_pct,
 )
 
+logger = logging.getLogger(__name__)
+
 TEAM_STATE_PATH = DATA_DIR / "processed" / "team_state.json"
 MODEL_PATH = DATA_DIR / "models" / "saved_models" / "xgboost_v1.pkl"
 FEATURE_COLUMNS_PATH = DATA_DIR / "models" / "saved_models" / "feature_columns.json"
@@ -88,10 +91,10 @@ class GamePrediction:
 class PredictorService:
     """
     Charge le modèle et team_state.json UNE FOIS (au démarrage de l'API),
-    puis sert des prédictions à la demande. Recharger team_state.json à
-    chaque requête serait inutile (il ne change qu'une fois par jour via
-    nba_sync_service.py) — voir reload_team_state() pour un rechargement
-    explicite si besoin (ex: endpoint /admin/sync appelé).
+    puis sert des prédictions à la demande. team_state.json n'est relu que
+    si sa date de modification a changé (reload_team_state_if_changed(),
+    appelé par get_predictor_service()) : la synchro quotidienne remplace
+    le fichier sur le VPS sans redémarrer l'API.
     """
 
     def __init__(
@@ -112,6 +115,7 @@ class PredictorService:
         self._model: Any = None
         self._feature_columns: list[str] = []
         self._team_state: dict = {}
+        self._team_state_mtime: float | None = None
         self._load()
 
     def _load(self):
@@ -134,13 +138,28 @@ class PredictorService:
         self._model = joblib.load(self.model_path)
         with open(self.feature_columns_path, encoding="utf-8") as f:
             self._feature_columns = json.load(f)
-        with open(self.team_state_path, encoding="utf-8") as f:
-            self._team_state = json.load(f)
+        self.reload_team_state()
 
     def reload_team_state(self):
-        """À appeler après une régénération de team_state.json (ex: POST /admin/sync)."""
+        """Relit team_state.json (après une synchro)."""
+        mtime = self.team_state_path.stat().st_mtime
         with open(self.team_state_path, encoding="utf-8") as f:
             self._team_state = json.load(f)
+        self._team_state_mtime = mtime
+
+    def reload_team_state_if_changed(self):
+        """
+        Relit team_state.json si le fichier a été remplacé depuis le dernier
+        chargement. En cas d'échec (fichier absent ou illisible), on garde
+        l'état déjà en mémoire : mieux vaut une prédiction basée sur l'état
+        de la veille qu'une API en erreur.
+        """
+        try:
+            if self.team_state_path.stat().st_mtime != self._team_state_mtime:
+                self.reload_team_state()
+                logger.info("team_state.json rechargé (as_of : %s)", self._team_state.get("as_of"))
+        except (OSError, json.JSONDecodeError):
+            logger.exception("Rechargement de team_state.json impossible, état précédent conservé")
 
     # ------------------------------------------------------------------
     # Construction des features pour UN match (home vs away)
@@ -320,4 +339,6 @@ def get_predictor_service() -> PredictorService:
     global _service
     if _service is None:
         _service = PredictorService()
+    else:
+        _service.reload_team_state_if_changed()
     return _service

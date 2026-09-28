@@ -23,6 +23,7 @@ Application hybride Python/JavaScript qui :
 | Back-End / API  | Python, FastAPI, uvicorn                                                  |
 | Base de données | PostgreSQL ou Supabase (pas encore branchée)                              |
 | Front-End       | Next.js (App Router) + Tailwind CSS, JavaScript (pas TypeScript)          |
+| Hébergement     | VPS personnel de l'utilisateur (pas encore déployé, voir "Déploiement")   |
 
 ## Arborescence du projet
 
@@ -32,6 +33,7 @@ nba-predictor/
 ├── data/                          # Scripts Python : collecte & ML
 │   ├── collectors/
 │   │   ├── fetch_games.py          # FAIT — voir "État du pipeline ML" ci-dessous
+│   │   ├── fetch_schedule.py       # FAIT (2026-09-28) — calendrier J-3 → J+14 → processed/schedule.json (lu par l'API)
 │   │   ├── fetch_players_stats.py  # pas encore développé
 │   │   └── fetch_teams_stats.py    # pas encore développé
 │   ├── preprocessing/
@@ -53,7 +55,7 @@ nba-predictor/
 │   ├── app/
 │   │   ├── main.py                 # FAIT (réécrit cette session) — squelette FastAPI + CORS, logique déportée dans routers/
 │   │   ├── core/
-│   │   │   ├── config.py           # à créer
+│   │   │   ├── config.py           # FAIT (2026-09-28) — NBA_LIVE_SCHEDULE_FALLBACK (CORS/URL encore en dur ailleurs)
 │   │   │   └── database.py         # à créer (connexion Supabase/Postgres)
 │   │   ├── models/                 # à créer (ORM SQLAlchemy)
 │   │   ├── schemas/                # à créer (schémas Pydantic)
@@ -64,8 +66,8 @@ nba-predictor/
 │   │   │   └── players.py          # à créer
 │   │   └── services/
 │   │       ├── predictor_service.py    # FAIT (cette session) — charge xgboost_v1.pkl + team_state.json, construit les features live et prédit
-│   │       ├── schedule_service.py     # FAIT (cette session) — calendrier du jour via nba_api ScoreboardV3
-│   │       └── nba_sync_service.py     # PAS FAIT — job prévu pour régénérer team_state.json quotidiennement (actuellement : relance manuelle de team_state.py)
+│   │       ├── schedule_service.py     # FAIT — lit processed/schedule.json ; appel direct ScoreboardV3 en repli (dev local uniquement)
+│   │       └── nba_sync_service.py     # VIDE, OBSOLÈTE — remplacé par infra/sync_to_vps.ps1 (NBA bloquée depuis le VPS), à supprimer
 │   ├── tests/
 │   └── requirements.txt            # FAIT — pip freeze du venv (⚠️ sous PowerShell 5.1, `pip freeze > requirements.txt` écrit en UTF-16 : reconvertir en UTF-8)
 │
@@ -86,7 +88,8 @@ nba-predictor/
 ├── infra/
 │   ├── docker-compose.yml          # fichier vide (à écrire)
 │   ├── Dockerfile.api              # fichier vide (à écrire)
-│   └── Dockerfile.data             # fichier vide (à écrire)
+│   ├── Dockerfile.data             # fichier vide (probablement inutile : la synchro tourne sur le PC, pas sur le VPS)
+│   └── sync_to_vps.ps1             # FAIT (2026-09-28) — synchro quotidienne PC → VPS, voir "Déploiement"
 │
 ├── docs/
 │   └── architecture.md             # à compléter (peut reprendre le contenu de ce fichier)
@@ -286,7 +289,7 @@ Cœur de l'intégration. Charge le modèle + `team_state.json` + `feature_column
 2. Construit les 31 features exactement comme à l'entraînement, via `features_lib.py`.
 3. Gère les `None`/NaN nativement (XGBoost les supporte) plutôt que d'imputer une valeur arbitraire — utile en tout début de saison (moins de 5-10 matchs joués). Les `None` sont convertis en NaN via `.astype(float)` avant `predict_proba` (sinon colonne `object` → XGBoost lève une erreur, bug corrigé en session d'audit).
 4. **Changement de saison** : la saison du match est déduite de SA date (`features_lib.season_for_date()`, frontière en août), pas de `team_state.json`. Si elle est postérieure à la saison de `team_state.json` (ex : match d'octobre 2026 avec un état arrêté en avril 2026), on reproduit le pipeline d'entraînement : régression Elo de 25 % vers 1500 ET `win_pct`/`win_pct_context` remis à zéro (→ NaN). `win_pct_last10` et les moyennes glissantes ne sont pas remis à zéro, comme à l'entraînement. Avant la session d'audit, ni la régression ni la remise à zéro n'étaient appliquées (décalage entraînement/prédiction qui aurait touché tous les matchs 2026-27).
-4. Retourne probabilités de victoire + un score approximatif (**heuristique simple** basée sur forme offensive/défensive récente — le modèle ne fait QUE classifier victoire/défaite, il n'est pas entraîné à prédire un score).
+5. Retourne probabilités de victoire + un score approximatif (**heuristique simple** basée sur forme offensive/défensive récente — le modèle ne fait QUE classifier victoire/défaite, il n'est pas entraîné à prédire un score).
 
 - Erreurs distinguées : `PredictorNotReadyError` (modèle/fichiers absents) et `UnknownTeamError` (équipe absente de `team_state.json`, ex. nouvelle franchise) — jamais un plantage silencieux.
 - Testé avec de vrais `team_id` (Boston Celtics vs Denver Nuggets) : 64,3 % de proba pour Boston à domicile, cohérent avec un Elo plus élevé (1710 vs 1604) et une meilleure forme récente.
@@ -315,6 +318,7 @@ Réponse de `/games/today` :
       "game_id": "...",
       "game_time_utc": "...",
       "status": "...",
+      "season_type": "regular_season",
       "home_team": {"id": ..., "name": "...", "tricode": "..."},
       "away_team": {"id": ..., "name": "...", "tricode": "..."},
       "prediction": {
@@ -394,16 +398,131 @@ Validé visuellement côté utilisateur : cartes affichées correctement avec no
     - `.gitignore` : `data/raw/`, `data/processed/`, `data/notebooks/*.csv` ajoutés (documentés comme non versionnés mais ne l'étaient pas).
     - `front/tailwind.config.js` (vide, inutile en Tailwind v4) supprimé ; métadonnées `layout.js` (titre, `lang="fr"`) mises à jour.
     - Vérifié : prédiction réelle BOS–DEN sur 2026-01-15 (même saison, inchangée) et 2026-10-20 (Elo 1710 → 1657, win_pct → NaN) ; routeur appelé directement (équipe inconnue → `prediction: null`, date invalide → 400) ; `eslint` et `next build` OK. `TestClient` non utilisable dans le venv API (nécessite `httpx2`, non installé).
+12. **Session préparation du déploiement VPS (2026-09-28)** :
+    - Cible d'hébergement documentée : VPS OVH Starter de l'utilisateur (voir "Déploiement" ci-dessous).
+    - Tests réseau depuis le VPS : `stats.nba.com` (timeout silencieux) ET `cdn.nba.com` (403 Akamai) bloqués → décision : synchro depuis le PC, poussée vers le VPS.
+    - Implémenté : `fetch_games.py --refresh` + saisons calculées à partir de la date, `fetch_schedule.py` (calendrier → `schedule.json`), `schedule_service.py` qui lit ce fichier (appel direct à la NBA seulement en dev, `NBA_LIVE_SCHEDULE_FALLBACK`), rechargement auto de `team_state.json` dans `predictor_service.py`, `infra/sync_to_vps.ps1`.
+    - Champ `season_type` ajouté à `/games/today` + badge "Présaison" dans `GameCard.js` (choix de l'utilisateur : garder les matchs de présaison, signalés).
+    - Vérifié : synchro complète en local (`-NoPush`), 6 scénarios du routeur, connexion SSH par clé vers `ubuntu@remicoimbra.fr`, `eslint` sur `GameCard.js`. **Pas testé** : envoi réel vers le VPS, tâche planifiée, badge vu dans le navigateur.
+
+## Déploiement (cible : VPS personnel)
+
+L'utilisateur dispose d'un **VPS personnel** et y hébergera le projet complet (front + API + pipeline data). Pas de Vercel ni de PaaS : tout tourne sur la même machine. Rien n'est encore déployé.
+
+### Caractéristiques du VPS (fournies par l'utilisateur, 2026-09-28)
+
+| Élément        | Valeur                                                                                                           |
+| -------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Offre          | OVH VPS Starter                                                                                                  |
+| OS             | Ubuntu (utilisateur `ubuntu`, hôte `vps-468382b1`)                                                               |
+| RAM            | 3,7 Gio au total, environ 0,9 Gio utilisés et 2,8 Gio disponibles (déjà d'autres services dessus)                |
+| Stockage       | 40 Go                                                                                                            |
+| Docker         | Installé                                                                                                         |
+| Serveurs web   | **Caddy actif sur 80/443** (vérifié avec `ss -tlnp`) ; Apache installé mais n'écoute pas sur ces ports           |
+| Python système | `python3` uniquement (pas de `python`), `nba_api` non installé                                                   |
+| Accès SSH      | `ubuntu@remicoimbra.fr`, clé SSH du PC déjà autorisée (vérifié le 2026-09-28 avec `ssh -o BatchMode=yes`)        |
+| Nom de domaine | `remicoimbra.fr` pointe sur le VPS ; domaine/sous-domaine du projet pas encore choisi (ex. `nba.remicoimbra.fr`) |
+| CPU            | Pas encore connu                                                                                                 |
+
+Conséquences :
+
+- **Reverse proxy = Caddy** (actif sur 80/443). Le projet doit **s'ajouter** au `Caddyfile` existant (nouveau bloc de site, HTTPS automatique), sans lancer de deuxième reverse proxy ni toucher aux sites déjà servis. Apache est présent mais inactif sur 80/443 : ne pas s'en servir. Les conteneurs du projet n'exposent leurs ports que sur `127.0.0.1` (ex. `127.0.0.1:8000:8000`), jamais publiquement.
+- **RAM (≈ 2,8 Gio libres, partagés avec l'existant)** : suffisant pour faire tourner le front (`next start`, ~150-250 Mo), l'API (pandas + xgboost chargés, ~300-400 Mo) et plus tard un Postgres léger. En revanche `next build` et le pipeline ML complet (`feature_engineering.py` sur 8 000+ matchs) sont des pics plus lourds : les lancer plutôt en local ou dans une image Docker construite ailleurs, ou au minimum vérifier qu'un swap existe (`swapon --show`).
+- **Stockage (40 Go)** : largement suffisant pour les données (quelques dizaines de Mo) ; surveiller surtout les images Docker accumulées (`docker system prune` de temps en temps).
+- **OVH = IP de datacenter** : `stats.nba.com` ET `cdn.nba.com` bloquent le VPS (voir plus bas). La synchro des données se fait donc depuis le PC de l'utilisateur.
+
+### Architecture visée
+
+```
+PC de l'utilisateur (IP résidentielle, tâche planifiée Windows quotidienne)
+  infra/sync_to_vps.ps1 : fetch_games --refresh → clean_data → team_state → fetch_schedule
+        │  scp + mv atomique (SSH par clé)
+        ▼
+VPS : data/processed/team_state.json + schedule.json
+        ▲ relus automatiquement par l'API quand leur date de modification change
+Internet ──HTTPS──> Caddy (déjà présent et actif sur le VPS)
+                      ├── /      → front Next.js (next start, port 3000)
+                      └── /api   → API FastAPI (uvicorn, port 8000, NBA_LIVE_SCHEDULE_FALLBACK=0)
+                                     ├── lit data/processed/team_state.json + schedule.json
+                                     └── lit data/models/saved_models/
+(plus tard) PostgreSQL sur le VPS lui-même
+```
+
+L'API sur le VPS ne fait **aucun** appel réseau vers la NBA.
+
+Un seul domaine avec l'API sous `/api` évite de gérer le CORS entre deux origines. Des sous-domaines séparés (`api.xxx`) marchent aussi, mais dans ce cas les origines CORS doivent être configurées.
+
+### Conséquences pour le code
+
+- **Config en dur à sortir** (bloquant) : `http://127.0.0.1:8000` dans `front/src/services/api.js` → `NEXT_PUBLIC_API_URL` ; origines CORS dans `api/app/main.py` → variable d'environnement via `api/app/core/config.py`. ⚠️ `NEXT_PUBLIC_*` est injecté **au build** Next.js, pas au démarrage : il faut rebuilder le front si l'URL change.
+- **Docker Compose** devient la voie naturelle (`infra/` est déjà prévu) : ça règle aussi la version de Python (le venv local est en 3.14, la distribution du VPS risque d'avoir une version plus ancienne). L'image API doit embarquer ou monter `data/preprocessing/features_lib.py`, `data/processed/` et `data/models/saved_models/` (import via `sys.path`, voir plus bas).
+- **Artefacts non versionnés** : `.pkl`, `feature_columns.json`, `team_state.json` et les CSV sont dans `.gitignore`. Un `git clone` sur le VPS ne suffit donc pas : il faut soit les copier (`scp`/`rsync`), soit relancer le pipeline sur le VPS.
+- **BDD** : avec un VPS, un PostgreSQL local (conteneur Docker) devient l'option la plus simple, plutôt que Supabase.
+- **Sécurité** : `POST /admin/*` ne doit jamais être exposé publiquement sans protection (token ou accès limité au réseau local du VPS). Désactiver `--reload` d'uvicorn en production.
+
+### ❌ `stats.nba.com` est BLOQUÉ depuis le VPS (testé le 2026-09-28)
+
+`stats.nba.com` est connu pour laisser pendre sans réponse les requêtes venant d'IP de datacenters/hébergeurs cloud. **Confirmé sur le VPS OVH** avec les deux tests ci-dessous : curl avec en-têtes navigateur complets → `000` après 20 s (0 octet reçu) ; `nba_api` dans un conteneur → `ReadTimeout` après 15 s. La connexion TLS s'établit mais le serveur ne répond jamais : blocage silencieux côté NBA, pas un problème de config du VPS. Les en-têtes navigateur n'y changent rien.
+
+**`cdn.nba.com` aussi bloqué depuis le VPS (testé le 2026-09-28)** : `403 Access Denied` (page Akamai, référence `#18.d5831002.1`) immédiat sur `static/json/staticData/scheduleLeagueV2.json` et `static/json/liveData/boxscore/boxscore_0022500001.json`, avec OU sans User-Agent navigateur. La piste "synchro 100 % autonome sur le VPS via le CDN" est donc écartée.
+
+### ✅ Décision : synchro depuis le PC, poussée vers le VPS (implémentée le 2026-09-28)
+
+Dépend du PC allumé une fois par jour (la tâche planifiée rattrape l'exécution manquée au prochain démarrage). Si le PC reste éteint plusieurs jours, les prédictions utilisent un `team_state.json` de plus en plus périmé et le calendrier finit par ne plus couvrir la date du jour (404) — dégradé, pas en panne.
+
+Fichiers ajoutés/modifiés :
+
+- **`data/collectors/fetch_games.py`** : option `--refresh` (re-télécharge la saison en cours + la dernière saison présente dans le cache + les saisons manquantes, garde le reste du cache). Sans l'option, comportement inchangé (cache réutilisé tel quel, aucun appel réseau). La liste des saisons est désormais **calculée à partir de la date** (`all_seasons()`, via `features_lib.season_for_date`) : l'ancienne liste en dur s'arrêtait à 2025-26 et aurait ignoré 2026-27 en silence.
+- **`data/collectors/fetch_schedule.py`** (nouveau) : `ScoreboardV3` jour par jour sur J-3 → J+14 (ou `--from/--to`) → `data/processed/schedule.json`. Une date absente du fichier = non synchronisée ; une liste vide = synchronisée, aucun match. Tout ou rien : si un jour échoue, le fichier existant n'est pas touché. Écriture atomique. Les dates déjà présentes hors fenêtre sont conservées.
+- **`api/app/services/schedule_service.py`** : lit d'abord `schedule.json` (cache invalidé par date de modification). Si la date n'y est pas : appel direct à la NBA (même code `fetch_schedule.fetch_day`, timeout 15 s) **seulement si** `NBA_LIVE_SCHEDULE_FALLBACK` est actif, sinon `ScheduleNotCoveredError` → **404** immédiat dans `routers/games.py`. Limite : le statut ("7:00 pm ET", "Final") est celui du moment de la synchro.
+- **`api/app/core/config.py`** (était vide) : `NBA_LIVE_SCHEDULE_FALLBACK`, `True` par défaut (dev local : le sélecteur de date marche pour toute date). **À mettre à `0` sur le VPS**, sinon chaque date non synchronisée fait attendre le visiteur 15 s avant une erreur 502.
+- **`api/app/services/predictor_service.py`** : `team_state.json` relu automatiquement quand sa date de modification change (`reload_team_state_if_changed()`, appelé par `get_predictor_service()`). Fichier illisible → état précédent conservé + log d'erreur.
+- **`infra/sync_to_vps.ps1`** (nouveau) : enchaîne `fetch_games --refresh` → `clean_data` → `team_state` → `fetch_schedule` avec le Python de `api/venv`, puis `scp` des deux JSON vers `<fichier>.tmp` sur le VPS et `mv` atomique via `ssh`. `-NoPush` pour tester en local. Journal dans `infra/logs/sync_AAAA-MM-JJ.log` (ignoré par git via `*.log`). Enregistré en UTF-8 **avec BOM** (sinon PowerShell 5.1 abîme les accents) : garder ce BOM si le fichier est réécrit. Pas de réentraînement du modèle au quotidien (inutile).
+
+Validé le 2026-09-28 : `sync_to_vps.ps1 -NoPush` complet sur le PC (2025-26 re-téléchargée, 1 230 matchs, identique au cache ; 2026-27 → 0 match joué ; calendrier 2026-09-25 → 2026-10-12, 41 matchs). Routeur appelé directement : date couverte → vraies prédictions ; date couverte sans match → `count: 0` ; date non couverte avec repli désactivé → 404 en 0,00 s ; avec repli → appel direct OK ; `team_state.json` remplacé → rechargé sans redémarrage ; fichier corrompu → état précédent conservé. **Pas encore testé** : l'envoi `scp`/`ssh` vers le VPS (pas de clé SSH ni de dossier cible configurés) et la tâche planifiée.
+
+⚠️ **Présaison dans le calendrier** : `ScoreboardV3` renvoie aussi les matchs de présaison (ID en `001…`, ex. `0012600009` le 2026-10-03 ; saison régulière = `002…`, playoffs = `004…`). Le modèle n'est entraîné que sur la saison régulière et les rotations de présaison n'ont rien à voir. **Décision de l'utilisateur : les garder, avec un badge.** L'API renvoie un champ `season_type` par match (déduit du préfixe du `game_id` : `preseason`, `regular_season`, `all_star`, `playoffs`, `play_in`, sinon `other`), et `GameCard.js` affiche un badge "Présaison" (avec infobulle "prédiction indicative") quand `season_type === "preseason"`. Les éventuels adversaires hors NBA (clubs étrangers) donnent `prediction: null` (équipe inconnue, déjà géré).
+
+**Reste à faire côté utilisateur pour activer l'envoi** :
+
+1. ~~Clé SSH~~ : déjà en place, `-VpsHost ubuntu@remicoimbra.fr`.
+2. Dossier cible sur le VPS (celui monté comme `data/processed/` dans le conteneur API).
+3. Tâche planifiée Windows (heure à choisir après la fin des matchs de la nuit, ~6 h heure de Paris) :
+
+```powershell
+$script = "C:\Users\Rémi\Documents\projets_perso\nba-predictor\infra\sync_to_vps.ps1"
+$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$script`" -VpsHost ubuntu@remicoimbra.fr -RemoteDir <dossier>"
+$trigger = New-ScheduledTaskTrigger -Daily -At 10:00
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable   # rattrape si le PC était éteint à 10:00
+Register-ScheduledTask -TaskName "NBA Predictor - synchro VPS" -Action $action -Trigger $trigger -Settings $settings
+```
+
+Commandes de test réseau utilisées (pour mémoire). `nba_api` n'est pas installé sur le système (et Ubuntu récent refuse `pip install` hors venv, PEP 668) :
+
+```bash
+# 1) curl seul, rien à installer (affiche code HTTP + durée ; 000 = timeout/blocage)
+curl -sS -m 20 -o /dev/null -w "%{http_code} %{time_total}s\n" \
+  -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" \
+  -H "Referer: https://www.nba.com/" -H "Origin: https://www.nba.com" -H "Accept: application/json" \
+  "https://stats.nba.com/stats/scoreboardv3?GameDate=2026-01-15&LeagueID=00"
+
+# 2) test via nba_api dans un conteneur jetable (même code que l'API)
+docker run --rm python:3.12-slim sh -c "pip install -q nba_api && python -c \"from nba_api.stats.endpoints import scoreboardv3; print(scoreboardv3.ScoreboardV3(game_date='2026-01-15', timeout=15).get_dict().keys())\""
+```
 
 ## Prochaines étapes (à faire)
 
-1. **`nba_sync_service.py`** : automatiser la régénération quotidienne de `team_state.json` (actuellement : relance manuelle de `team_state.py`). Rendrait aussi possible un `POST /admin/sync/games` fonctionnel (actuellement juste dans la liste cible des endpoints, pas implémenté).
+0. **Déploiement sur le VPS** (voir "Déploiement" plus haut) : la synchro PC → VPS est codée et testée en local. Restent : Docker Compose + bloc `Caddyfile` (étape 6), config sortie du code (étape 7), puis dossier cible + tâche planifiée pour activer l'envoi (clé SSH déjà OK). **Propositions faites, pas encore validées par l'utilisateur** (reportées à une prochaine session) :
+   - sous-domaine `nba.remicoimbra.fr` (enregistrement DNS CNAME vers `remicoimbra.fr` ou A vers l'IP du VPS), pour ne pas toucher à ce que sert déjà `remicoimbra.fr` ;
+   - projet cloné dans `/home/ubuntu/nba-predictor` sur le VPS → `-RemoteDir /home/ubuntu/nba-predictor/data/processed` pour la synchro ;
+   - lire le `Caddyfile` existant par SSH (lecture seule) avant d'y ajouter le bloc du projet, pour ne pas casser les sites déjà servis.
+1. ~~`nba_sync_service.py`~~ : **remplacé** par `infra/sync_to_vps.ps1` (la synchro ne peut pas tourner dans l'API sur le VPS, NBA bloquée). `api/app/services/nba_sync_service.py` reste un fichier vide, à supprimer. `POST /admin/sync/games` n'a plus lieu d'être sous cette forme.
 2. **Finir le refactor API** : `routers/predictions.py`, `routers/teams.py`, `routers/players.py` sont toujours des fichiers vides — seul `routers/games.py` a une vraie logique pour l'instant.
 3. **Choix et setup de la BDD** : décider entre PostgreSQL local ou Supabase, créer les tables du schéma (à mettre à jour avec les vraies colonnes : Elo, Net Rating, win_pct_context...). `team_state.json` fait office de solution transitoire correcte pour l'instant.
 4. Tester `/games/today` (et le sélecteur de date du front) avec de VRAIS matchs programmés dès le retour de la saison régulière NBA (mi-octobre 2026) — jusque-là, le paramètre `?date=` ne permet qu'un test partiel (Elo/forme actuels appliqués à une date passée, voir limite documentée dans "Adaptation front" plus haut).
 5. (Optionnel) Poursuivre l'optimisation ML si le temps le permet : tuning XGBoost (GridSearch/early stopping), validation croisée temporelle multi-saisons pour vérifier la robustesse du gain Elo (actuellement mesuré sur une seule saison de test), affiner le calcul du Net Rating (ratio de sommes plutôt que moyenne de ratios, pour réduire le bruit). Amélioration possible aussi sur le score approximatif prédit (actuellement une heuristique simple, pas un vrai modèle de régression).
-6. (Optionnel) Dockeriser l'API et le service data (`infra/docker-compose.yml`). Prérequis : l'API importe `data/preprocessing/features_lib.py` via `sys.path` et lit `data/processed/` + `data/models/saved_models/` → l'image API doit embarquer (ou monter) ces dossiers de `data/`.
-7. (Optionnel) Sortir la config en dur : URL de l'API dans `front/src/services/api.js` (→ `NEXT_PUBLIC_API_URL`) et origines CORS dans `api/app/main.py` (→ `api/app/core/config.py`, actuellement vide). Indispensable avant tout déploiement.
+6. (Prérequis du déploiement VPS) Dockeriser l'API et le service data (`infra/docker-compose.yml`). Prérequis : l'API importe `data/preprocessing/features_lib.py` via `sys.path` et lit `data/processed/` + `data/models/saved_models/` → l'image API doit embarquer (ou monter) ces dossiers de `data/`.
+7. (Prérequis du déploiement VPS) Sortir la config en dur : URL de l'API dans `front/src/services/api.js` (→ `NEXT_PUBLIC_API_URL`) et origines CORS dans `api/app/main.py` (→ `api/app/core/config.py`, actuellement vide). Indispensable avant tout déploiement.
 8. (Optionnel, UX) Ajouter un état de chargement/skeleton plus soigné dans `page.js` que le simple texte "Chargement..." actuel.
 9. Écrire `README.md` et `docs/architecture.md` (tous deux vides) — important pour un projet portfolio.
 
@@ -441,4 +560,11 @@ python preprocessing\clean_data.py
 python preprocessing\feature_engineering.py
 python models\train_model.py
 python preprocessing\team_state.py        # génère team_state.json — À REFAIRE après tout changement de games_clean.csv, l'API le lit directement
+python collectors\fetch_schedule.py       # génère schedule.json (calendrier J-3 → J+14)
+```
+
+**Synchro quotidienne (nouveaux matchs + calendrier), sans réentraînement :**
+
+```powershell
+.\infra\sync_to_vps.ps1 -NoPush           # en local ; sans -NoPush : envoi vers le VPS (voir "Déploiement")
 ```

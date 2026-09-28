@@ -8,28 +8,55 @@ prêt à être repris par preprocessing/clean_data.py.
 Usage :
     cd data
     pip install nba_api pandas
-    python collectors/fetch_games.py
+    python collectors/fetch_games.py             # réutilise le brut en cache s'il existe
+    python collectors/fetch_games.py --refresh   # re-télécharge la saison en cours (synchro quotidienne)
 
 nba_api tape sur stats.nba.com (non officiel) : on met des pauses entre
 les appels et on retry en cas d'erreur réseau/timeout, ce qui arrive
 régulièrement et ne veut pas dire que le script est cassé.
+
+⚠️ stats.nba.com bloque l'IP du VPS de production (cf. CLAUDE.md,
+"Déploiement") : ce script tourne sur une machine à IP résidentielle,
+via infra/sync_to_vps.ps1.
 """
 
+import argparse
+import sys
 import time
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
 from nba_api.stats.endpoints import leaguegamefinder
 
+# Même règle de rattachement date -> saison que le reste du pipeline
+# (frontière en août), plutôt qu'une deuxième implémentation à maintenir.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "preprocessing"))
+from features_lib import season_for_date  # type: ignore[import-not-found]  # noqa: E402
+
 # --- Config -----------------------------------------------------------
 
-SEASONS = ["2019-20", "2020-21", "2021-22", "2022-23", "2023-24", "2024-25", "2025-26"]
+FIRST_SEASON_START_YEAR = 2019  # 2019-20
 SEASON_TYPE = "Regular Season"  # ou "Playoffs" si tu veux les inclure séparément
 SLEEP_BETWEEN_CALLS = 1.5  # secondes, pour ne pas se faire bloquer
 MAX_RETRIES = 3
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "raw"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def all_seasons(today: date | None = None) -> list[str]:
+    """
+    De 2019-20 jusqu'à la saison en cours INCLUSE (calculée à partir de la
+    date, pas figée dans le code : une liste en dur aurait silencieusement
+    ignoré 2026-27 au changement de saison).
+    """
+    current = season_for_date(today or date.today())
+    last_start_year = int(current[:4])
+    return [
+        f"{y}-{(y + 1) % 100:02d}"
+        for y in range(FIRST_SEASON_START_YEAR, last_start_year + 1)
+    ]
 
 
 # --- Collecte brute -----------------------------------------------------
@@ -128,26 +155,57 @@ def recombine_games(df_raw: pd.DataFrame) -> pd.DataFrame:
 
 # --- Main -----------------------------------------------------------------
 
-def load_or_fetch_raw() -> pd.DataFrame:
+def load_or_fetch_raw(refresh: bool = False) -> pd.DataFrame:
     """
-    Réutilise le CSV brut déjà collecté s'il existe, pour ne pas re-taper
-    inutilement stats.nba.com (rate limits) quand on ne fait que retravailler
-    la recombinaison / les features.
+    Sans `refresh` : réutilise le CSV brut déjà collecté s'il existe, pour
+    ne pas re-taper inutilement stats.nba.com (rate limits) quand on ne
+    fait que retravailler la recombinaison / les features.
+
+    Avec `refresh` (synchro quotidienne) : re-télécharge uniquement
+      - la saison en cours (nouveaux matchs joués depuis la dernière fois),
+      - la dernière saison présente dans le cache (elle a pu être mise en
+        cache avant sa fin : sans ça, ses derniers matchs manqueraient
+        pour toujours une fois la saison suivante commencée),
+      - les saisons absentes du cache,
+    et garde le reste du cache tel quel.
     """
     raw_path = OUTPUT_DIR / "games_raw_all_seasons.csv"
-    if raw_path.exists():
+    seasons = all_seasons()
+
+    if not raw_path.exists():
+        print(f"Collecte de {len(seasons)} saisons : {seasons}")
+        df_raw = fetch_all_seasons(seasons, SEASON_TYPE)
+    elif not refresh:
         print(f"Brut déjà présent, réutilisation : {raw_path}")
         return pd.read_csv(raw_path)
+    else:
+        # GAME_ID lu en str : les matchs fraîchement téléchargés ont des ID
+        # en str ("0022600001"), un mélange int/str ferait planter le
+        # groupby trié de recombine_games().
+        cached = pd.read_csv(raw_path, dtype={"GAME_ID": str})
+        known = set(cached["SEASON"].astype(str))
+        to_refresh = {seasons[-1], max(known)} | (set(seasons) - known)
+        to_fetch = [s for s in seasons if s in to_refresh]
+        print(f"Brut présent, rafraîchissement de : {to_fetch}")
+        fresh = fetch_all_seasons(to_fetch, SEASON_TYPE)
+        fresh["GAME_ID"] = fresh["GAME_ID"].astype(str)
+        df_raw = pd.concat([cached[~cached["SEASON"].isin(to_fetch)], fresh], ignore_index=True)
 
-    print(f"Collecte de {len(SEASONS)} saisons : {SEASONS}")
-    df_raw = fetch_all_seasons(SEASONS, SEASON_TYPE)
     df_raw.to_csv(raw_path, index=False)
     print(f"Brut sauvegardé : {raw_path} ({len(df_raw)} lignes)")
     return df_raw
 
 
 def main():
-    df_raw = load_or_fetch_raw()
+    parser = argparse.ArgumentParser(description="Collecte de l'historique des matchs NBA.")
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Re-télécharge la saison en cours même si un brut est en cache (synchro quotidienne).",
+    )
+    args = parser.parse_args()
+
+    df_raw = load_or_fetch_raw(refresh=args.refresh)
 
     df_games = recombine_games(df_raw)
     games_path = OUTPUT_DIR / "games_history.csv"
