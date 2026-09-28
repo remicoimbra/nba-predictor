@@ -88,7 +88,7 @@ def _season_type(game_id: str) -> str:
     return _SEASON_TYPE_BY_PREFIX.get(game_id[:3], "other")
 
 
-def _team_ref(team_id: int) -> TeamRef:
+def team_ref(team_id: int) -> TeamRef:
     info = _TEAM_INFO_BY_ID.get(team_id)
     return TeamRef(
         id=team_id,
@@ -152,14 +152,39 @@ def get_todays_games(target_date: date | None = None) -> list[ScheduledGame]:
             f"Calendrier non synchronisé pour le {key} (dates couvertes : {covered})."
         )
 
-    return [
-        ScheduledGame(
-            game_id=e["game_id"],
-            game_time_utc=e["game_time_utc"],
-            status=e["status"],
-            season_type=_season_type(e["game_id"]),
-            home_team=_team_ref(e["home_team_id"]),
-            away_team=_team_ref(e["away_team_id"]),
-        )
-        for e in entries
-    ]
+    return [_scheduled_game(e) for e in entries]
+
+
+def _scheduled_game(entry: dict) -> ScheduledGame:
+    return ScheduledGame(
+        game_id=entry["game_id"],
+        game_time_utc=entry["game_time_utc"],
+        status=entry["status"],
+        season_type=_season_type(entry["game_id"]),
+        home_team=team_ref(entry["home_team_id"]),
+        away_team=team_ref(entry["away_team_id"]),
+    )
+
+
+def find_game(game_id: str, target_date: date | None = None) -> tuple[date, ScheduledGame] | None:
+    """
+    Retrouve un match par son game_id. Avec une date : cherche parmi les
+    matchs de ce jour (repli en direct possible, cf. get_todays_games).
+    Sans date : parcourt schedule.json uniquement. None si introuvable.
+    """
+    if target_date is not None:
+        for game in get_todays_games(target_date):
+            if game.game_id == game_id:
+                return target_date, game
+        return None
+
+    for key, entries in _load_schedule_dates().items():
+        for entry in entries:
+            if entry["game_id"] == game_id:
+                return date.fromisoformat(key), _scheduled_game(entry)
+    return None
+
+
+def covered_dates() -> dict[str, int]:
+    """Dates présentes dans schedule.json -> nombre de matchs (0 = synchronisée, aucun match)."""
+    return {key: len(entries) for key, entries in sorted(_load_schedule_dates().items())}

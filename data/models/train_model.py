@@ -17,9 +17,11 @@ Usage :
 """
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, confusion_matrix, log_loss
@@ -34,6 +36,7 @@ MODEL_DIR = Path(__file__).resolve().parent / "saved_models"
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 TARGET_COL = "home_win"
+CALIBRATION_BINS = 10  # tranches de probabilité pour la courbe de calibration
 TEST_SEASON = "2025-26"  # saison la plus récente et complète -> jeu de test
 
 # Motifs des VRAIES features générées par feature_engineering.py (toutes
@@ -110,6 +113,32 @@ def evaluate(name: str, model, X_test, y_test) -> dict:
     print(cm)
 
     return {"name": name, "accuracy": acc, "log_loss": ll}
+
+
+def calibration_curve(y_true, y_proba, n_bins: int = CALIBRATION_BINS) -> list[dict]:
+    """
+    Pour chaque tranche de probabilité prédite (0-10 %, 10-20 %...) : proba
+    moyenne prédite, taux de victoire réel à domicile, nombre de matchs.
+    Un modèle bien calibré a des points proches de la diagonale (quand il
+    annonce 70 %, l'équipe à domicile gagne ~70 % du temps). Tranches vides
+    omises.
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_proba = np.asarray(y_proba, dtype=float)
+    bins = np.minimum((y_proba * n_bins).astype(int), n_bins - 1)
+    curve = []
+    for b in range(n_bins):
+        mask = bins == b
+        if not mask.any():
+            continue
+        curve.append({
+            "bin_start": b / n_bins,
+            "bin_end": (b + 1) / n_bins,
+            "mean_predicted": float(y_proba[mask].mean()),
+            "actual_rate": float(y_true[mask].mean()),
+            "count": int(mask.sum()),
+        })
+    return curve
 
 
 def train_logreg(X_train, y_train, feature_cols):
@@ -190,6 +219,31 @@ def main():
     # si on ajoute une feature plus tard sans mettre à jour les deux côtés).
     with open(MODEL_DIR / "feature_columns.json", "w", encoding="utf-8") as f:
         json.dump(feature_cols, f, indent=2)
+
+    # Métriques exposées par l'API (GET /model/metrics) pour la page
+    # « Le modèle » du front : régénérées à chaque entraînement, jamais
+    # recopiées à la main.
+    metrics = {
+        "trained_at": datetime.now(timezone.utc).isoformat(),
+        "test_season": TEST_SEASON,
+        "train_games": int(len(train)),
+        "test_games": int(len(test)),
+        "baseline_accuracy": float(home_baseline_acc),
+        "models": [
+            {"key": "xgboost", "name": "XGBoost", "accuracy": float(xgb_results["accuracy"]),
+             "log_loss": float(xgb_results["log_loss"])},
+            {"key": "logreg", "name": "Régression logistique", "accuracy": float(logreg_results["accuracy"]),
+             "log_loss": float(logreg_results["log_loss"])},
+        ],
+        "feature_importances": {
+            col: float(v) for col, v in sorted(
+                zip(feature_cols, xgb.feature_importances_), key=lambda kv: kv[1], reverse=True
+            )
+        },
+        "calibration": calibration_curve(y_test, xgb.predict_proba(X_test)[:, 1]),
+    }
+    with open(MODEL_DIR / "model_metrics.json", "w", encoding="utf-8") as f:
+        json.dump(metrics, f, indent=2, ensure_ascii=False)
 
     print(f"\nModèles sauvegardés dans : {MODEL_DIR}")
     print(f"Ordre des features sauvegardé : {MODEL_DIR / 'feature_columns.json'}")

@@ -31,6 +31,7 @@ from typing import Any, Optional
 
 import joblib
 import pandas as pd
+import xgboost as xgb
 
 # --- Rendre features_lib.py importable depuis l'API sans dupliquer le code ---
 # api/ et data/ sont deux dossiers frères du projet : plutôt que de copier
@@ -52,6 +53,7 @@ from features_lib import (  # type: ignore[import-not-found]  # noqa: E402
     ELO_INITIAL,
     FORM_WINDOW,
     ROLLING_WINDOWS,
+    elo_expected_home,
     elo_for_target_season,
     is_later_season,
     net_rtg_from_boxscore,
@@ -66,6 +68,30 @@ logger = logging.getLogger(__name__)
 TEAM_STATE_PATH = DATA_DIR / "processed" / "team_state.json"
 MODEL_PATH = DATA_DIR / "models" / "saved_models" / "xgboost_v1.pkl"
 FEATURE_COLUMNS_PATH = DATA_DIR / "models" / "saved_models" / "feature_columns.json"
+
+
+# Familles de features pour expliquer une prédiction : les contributions
+# XGBoost des colonnes home_/away_/diff_ d'une même famille sont sommées.
+# Ordre important : un motif plus spécifique (win_pct_context) doit passer
+# avant le motif générique (win_pct) qu'il contient.
+FACTOR_FAMILIES = [
+    ("elo", "Rating Elo", ("elo",)),
+    ("context", "Bilan domicile / extérieur", ("win_pct_context",)),
+    ("form", "Forme (10 derniers matchs)", ("win_pct_last10",)),
+    ("season", "Bilan de la saison", ("win_pct",)),
+    ("net_rtg", "Net Rating récent", ("net_rtg_last",)),
+    ("offense", "Attaque récente", ("avg_pts_scored_last",)),
+    ("defense", "Défense récente", ("avg_pts_allowed_last",)),
+    ("rest", "Jours de repos", ("rest_days",)),
+]
+
+
+def _factor_family(column: str) -> tuple[str, str]:
+    base = column.split("_", 1)[1]  # retire home_/away_/diff_
+    for key, label, patterns in FACTOR_FAMILIES:
+        if any(base.startswith(p) for p in patterns):
+            return key, label
+    return "other", "Autres"
 
 
 class PredictorNotReadyError(RuntimeError):
@@ -85,6 +111,9 @@ class GamePrediction:
     predicted_winner: str          # "home" ou "away"
     predicted_home_score: float
     predicted_away_score: float
+    elo_home_probability: float    # proba donnée par l'Elo seul, pour comparaison avec le modèle
+    factors: list                  # [{key, label, contribution}] en log-odds, > 0 = favorise l'équipe à domicile
+    base_value: float              # log-odds de départ du modèle (avant contributions)
     features_used: dict            # utile pour debug / affichage détaillé côté front
 
 
@@ -174,6 +203,29 @@ class PredictorService:
             )
         return team
 
+    def _season_context(self, team: dict, as_of_date) -> tuple[float, dict, bool]:
+        """
+        Elo et résultats de saison à utiliser pour un match à `as_of_date`.
+
+        Saison du match déduite de SA date (pas de celle de team_state.json) :
+        si le match tombe dans une saison postérieure, on reproduit ce que
+        fait le pipeline d'entraînement au changement de saison — régression
+        Elo vers la moyenne ET remise à zéro de win_pct/win_pct_context
+        (calculés par saison dans feature_engineering.py).
+
+        Retourne (elo, season_results, nouvelle_saison).
+        """
+        known_season = self._team_state["as_of"]["season"]
+        target_season = season_for_date(as_of_date)
+        elo = elo_for_target_season(
+            rating=team["elo"],
+            last_known_season=known_season,
+            target_season=target_season,
+        )
+        if is_later_season(target_season, known_season):
+            return elo, {"all": [], "home": [], "away": []}, True
+        return elo, team["season_results"], False
+
     def _team_side_features(self, team: dict, is_home: bool, as_of_date) -> dict:
         """
         Calcule les features d'UNE équipe pour le match, dans le rôle
@@ -205,25 +257,9 @@ class PredictorService:
         # ligne corrompue) : à exclure des moyennes glissantes.
         net_rtg_series = [v for v in net_rtg_series if v is not None]
 
-        # Saison du match à prédire, déduite de SA date (pas de celle de
-        # team_state.json) : si le match tombe dans une saison postérieure,
-        # on reproduit ce que fait le pipeline d'entraînement au changement
-        # de saison — régression Elo vers la moyenne ET remise à zéro de
-        # win_pct/win_pct_context (calculés par saison dans
-        # feature_engineering.py). win_pct_last10 et les moyennes glissantes
-        # ne sont pas remis à zéro, comme à l'entraînement.
-        known_season = self._team_state["as_of"]["season"]
-        target_season = season_for_date(as_of_date)
-        elo = elo_for_target_season(
-            rating=team["elo"],
-            last_known_season=known_season,
-            target_season=target_season,
-        )
-
-        if is_later_season(target_season, known_season):
-            season_results = {"all": [], "home": [], "away": []}
-        else:
-            season_results = team["season_results"]
+        # Changement de saison (cf. _season_context) : win_pct_last10 et les
+        # moyennes glissantes ne sont pas remis à zéro, comme à l'entraînement.
+        elo, season_results, _ = self._season_context(team, as_of_date)
         context_results = season_results["home" if is_home else "away"]
 
         features = {
@@ -272,6 +308,60 @@ class PredictorService:
 
         return row
 
+    def team_snapshot(self, team_id: int, is_home: bool, as_of_date=None) -> dict:
+        """
+        Stats d'une équipe à afficher côté front (fiche match) : mêmes
+        valeurs que les features du modèle, plus des données purement
+        descriptives (bilan V-D, derniers matchs, courbe Elo). Les champs
+        opponent_id / elo_history peuvent manquer dans un team_state.json
+        généré avant leur ajout : renvoyés à None / [] dans ce cas.
+        """
+        as_of_date = as_of_date or self._team_state["as_of"]["last_game_date"]
+        team = self._get_team(team_id)
+        features = self._team_side_features(team, is_home=is_home, as_of_date=as_of_date)
+        _, season_results, new_season = self._season_context(team, as_of_date)
+
+        def record(results: list) -> dict:
+            return {"wins": int(sum(results)), "losses": int(len(results) - sum(results))}
+
+        return {
+            "stats": features,
+            "new_season": new_season,
+            "record": record(season_results["all"]),
+            "home_record": record(season_results["home"]),
+            "away_record": record(season_results["away"]),
+            "recent_games": [
+                {
+                    "date": g["date"],
+                    "is_home": bool(g["is_home"]),
+                    "opponent_id": g.get("opponent_id"),
+                    "pts_scored": g["pts_scored"],
+                    "pts_allowed": g["pts_allowed"],
+                    "win": bool(g["win"]),
+                }
+                for g in team["recent_games"]
+            ],
+            "elo_history": team.get("elo_history", []),
+        }
+
+    def _factors(self, X: pd.DataFrame) -> tuple[list, float]:
+        """
+        Contributions de chaque feature à CETTE prédiction (valeurs de type
+        SHAP calculées par XGBoost, en log-odds, dont la somme + le biais
+        redonne exactement la sortie du modèle), regroupées par famille.
+        """
+        contribs = self._model.get_booster().predict(xgb.DMatrix(X), pred_contribs=True)[0]
+        base_value = float(contribs[-1])  # dernière colonne = biais
+        totals: dict = {}
+        for column, value in zip(self._feature_columns, contribs[:-1]):
+            key, label = _factor_family(column)
+            entry = totals.setdefault(key, {"key": key, "label": label, "contribution": 0.0})
+            entry["contribution"] += float(value)
+        factors = sorted(totals.values(), key=lambda f: abs(f["contribution"]), reverse=True)
+        for f in factors:
+            f["contribution"] = round(f["contribution"], 4)
+        return factors, base_value
+
     # ------------------------------------------------------------------
     # Prédiction
     # ------------------------------------------------------------------
@@ -298,6 +388,7 @@ class PredictorService:
         ).astype(float)
 
         proba = self._model.predict_proba(X)[0]
+        factors, base_value = self._factors(X)
         home_win_proba = float(proba[1])
         away_win_proba = float(proba[0])
 
@@ -326,6 +417,9 @@ class PredictorService:
             predicted_winner="home" if home_win_proba >= 0.5 else "away",
             predicted_home_score=round(predicted_home_score, 1),
             predicted_away_score=round(predicted_away_score, 1),
+            elo_home_probability=round(float(elo_expected_home(row["home_elo"], row["away_elo"])), 4),
+            factors=factors,
+            base_value=round(base_value, 4),
             features_used=row,
         )
 
