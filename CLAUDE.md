@@ -40,11 +40,11 @@ nba-predictor/
 │   │   ├── clean_data.py           # FAIT
 │   │   ├── feature_engineering.py  # FAIT — v3 (Pace/Net Rating, win_pct contexte, Elo), refactoré cette session
 │   │   ├── features_lib.py         # FAIT (nouveau, cette session) — logique Elo/rolling stats PARTAGÉE entre feature_engineering.py (batch) et predictor_service.py (live)
-│   │   └── team_state.py           # FAIT (nouveau, cette session) — construit team_state.json (état courant par équipe) à partir de games_clean.csv
+│   │   └── team_state.py           # FAIT — construit team_state.json (état courant par équipe) ; + opponent_id/elo_before par match récent et elo_history (30 pts) depuis la refonte UI
 │   ├── models/
-│   │   ├── train_model.py          # FAIT — LogReg + XGBoost comparés ; sauvegarde désormais aussi feature_columns.json (cette session)
+│   │   ├── train_model.py          # FAIT — LogReg + XGBoost comparés ; sauvegarde feature_columns.json ET model_metrics.json (lu par GET /model/metrics)
 │   │   ├── evaluate_model.py       # pas encore développé (séparé de train_model.py)
-│   │   └── saved_models/           # logreg_baseline.pkl, xgboost_v1.pkl, feature_columns.json (non versionnés)
+│   │   └── saved_models/           # logreg_baseline.pkl, xgboost_v1.pkl, feature_columns.json, model_metrics.json (non versionnés)
 │   ├── raw/                        # games_raw_all_seasons.csv, games_history.csv (non versionnés)
 │   ├── processed/                  # games_clean.csv, game_features.csv, team_state.json (non versionnés)
 │   ├── notebooks/
@@ -60,7 +60,8 @@ nba-predictor/
 │   │   ├── models/                 # à créer (ORM SQLAlchemy)
 │   │   ├── schemas/                # à créer (schémas Pydantic)
 │   │   ├── routers/
-│   │   │   ├── games.py            # FAIT (cette session) — /games/today avec vraies prédictions XGBoost + paramètre ?date=
+│   │   │   ├── games.py            # FAIT — /games/today (+ résumé équipes), /games/calendar, /games/{game_id} (fiche complète)
+│   │   │   ├── model.py            # FAIT (refonte UI) — /model/metrics (lit model_metrics.json)
 │   │   │   ├── predictions.py      # à créer
 │   │   │   ├── teams.py            # à créer
 │   │   │   └── players.py          # à créer
@@ -74,14 +75,21 @@ nba-predictor/
 ├── front/                          # Next.js + Tailwind — ADAPTÉ au nouveau format cette session (voir "Adaptation front" plus bas)
 │   ├── src/
 │   │   ├── app/
-│   │   │   ├── layout.js
-│   │   │   ├── page.js             # FAIT (réécrit cette session) — Client Component avec sélecteur de date, plus un Server Component statique
-│   │   │   └── globals.css
+│   │   ├── app/                    # voir "Refonte UI" plus bas
+│   │   │   ├── layout.js           # polices (Inter + Barlow Condensed), script de thème anti-flash, Header, lien d'évitement
+│   │   │   ├── template.js         # fondu d'entrée des pages (motion)
+│   │   │   ├── globals.css         # palette light-dark() des 2 thèmes (vérifiée AAA par scripts/check-contrast.mjs)
+│   │   │   ├── page.js             # matchs du jour → components/HomeView.js (sous Suspense, lit ?date=)
+│   │   │   ├── match/[id]/page.js  # fiche match → components/MatchView.js
+│   │   │   └── modele/page.js      # page « Le modèle » → components/ModelView.js
 │   │   ├── components/
-│   │   │   └── GameCard.js         # FAIT — lit home_team.name/prediction.* (nouveau format), gère predicted_winner "home"/"away" ET prediction: null (équipe inconnue)
-│   │   ├── services/
-│   │   │   └── api.js              # FAIT (adapté cette session) — getTodayGames(date) accepte un paramètre date optionnel
-│   │   └── styles/
+│   │   │   ├── calendar/           # DatePicker (bandeau de jours) + CalendarPopover (grille mensuelle clavier) + dayStatus
+│   │   │   ├── charts/             # graphiques SVG/HTML maison animés (motion) : ProbabilityBar, WinGauge, FactorsChart, ComparisonBars, FormChart, EloLine, ModelCharts, DataTable, Tooltip
+│   │   │   ├── GameCard.js, DaySummary.js, TeamBits.js, States.js, Header.js, ThemeToggle.js, Providers.js
+│   │   ├── lib/                    # format.js (dates/nombres fr-FR), useApi.js (fetch + états), charts.js (échelles, useWidth, transitions)
+│   │   └── services/
+│   │       └── api.js              # getGames, getGame, getCalendar, getModelMetrics ; base = NEXT_PUBLIC_API_URL (défaut http://127.0.0.1:8000)
+│   ├── scripts/check-contrast.mjs  # `npm run check:contrast` : toutes les paires de couleurs >= 7:1 (texte) / 3:1 (graphiques)
 │   ├── package.json
 │   └── postcss.config.mjs          # Tailwind v4 : config "CSS-first" (@import "tailwindcss" dans globals.css), PAS de tailwind.config.js
 │
@@ -120,7 +128,7 @@ Ces choix conditionnent la structure du code, à respecter si on régénère ou 
 6. AUTOMATISATION (optionnel) → scheduler quotidien (cron / APScheduler)
 ```
 
-**État actuel du flux : les étapes 1 → 2 → 3 → 4 → 5 sont fonctionnelles et validées de bout en bout (1→2→3 sur données réelles, 7 saisons, 8 279 matchs ; 4 testée via TestClient + mocks côté Claude, et confirmée fonctionnelle en conditions réelles côté utilisateur ; 5 adaptée au nouveau format de réponse et testée visuellement côté utilisateur avec de vraies données, voir "Adaptation front" plus bas). `/games/today` sert désormais de VRAIES prédictions XGBoost, affichées correctement dans le dashboard. Aucune base de données n'est encore connectée (les CSV + `team_state.json` font office de BDD pour l'instant). L'étape 6 (automatisation) n'est toujours pas commencée : `team_state.json` doit pour l'instant être régénéré à la main (`python preprocessing/team_state.py`).**
+**État actuel du flux : les étapes 1 → 2 → 3 → 4 → 5 sont fonctionnelles et validées de bout en bout (1→2→3 sur données réelles, 7 saisons, 8 279 matchs ; 4 testée via TestClient + mocks côté Claude, et confirmée fonctionnelle en conditions réelles côté utilisateur ; 5 adaptée au nouveau format de réponse et testée visuellement côté utilisateur avec de vraies données, voir "Adaptation front" plus bas). `/games/today` sert désormais de VRAIES prédictions XGBoost, affichées correctement dans le dashboard. Depuis la refonte UI du 2026-09-28, le front a 3 pages (matchs du jour, fiche match avec graphiques explicatifs, page « Le modèle »), voir "Refonte UI". Aucune base de données n'est encore connectée (les CSV + `team_state.json` font office de BDD pour l'instant). L'étape 6 (automatisation) n'est toujours pas commencée : `team_state.json` doit pour l'instant être régénéré à la main (`python preprocessing/team_state.py`).**
 
 ## Schéma de base de données (cible, pas encore implémenté)
 
@@ -187,7 +195,8 @@ CREATE TABLE model_metrics (
 ```
 # Matchs
 GET  /games
-GET  /games/{game_id}
+GET  /games/{game_id}            # FAIT (refonte UI) — fiche complète, ?date= facultatif (sinon cherché dans schedule.json)
+GET  /games/calendar             # FAIT (refonte UI) — {today, live_fallback, dates: {date: nb_matchs}}
 GET  /games/today                # FAIT — vraies prédictions XGBoost (cette session). Paramètre optionnel ?date=YYYY-MM-DD (utile en intersaison / pour tester sur une date passée déjà en historique — voir limite dans "Intégration modèle → API" plus bas)
 
 # Équipes
@@ -200,7 +209,7 @@ GET  /predictions/{game_id}
 POST /predictions/generate
 
 # Modèle
-GET  /model/metrics
+GET  /model/metrics              # FAIT (refonte UI) — contenu de model_metrics.json, 404 si absent
 GET  /model/version
 
 # Admin
@@ -405,6 +414,27 @@ Validé visuellement côté utilisateur : cartes affichées correctement avec no
     - Champ `season_type` ajouté à `/games/today` + badge "Présaison" dans `GameCard.js` (choix de l'utilisateur : garder les matchs de présaison, signalés).
     - Vérifié : synchro complète en local (`-NoPush`), 6 scénarios du routeur, connexion SSH par clé vers `ubuntu@remicoimbra.fr`, `eslint` sur `GameCard.js`. **Pas testé** : envoi réel vers le VPS, tâche planifiée, badge vu dans le navigateur.
 
+13. **Refonte UI (2026-09-28)** : voir "Refonte UI" ci-dessous.
+
+## Refonte UI (2026-09-28)
+
+Demande de l'utilisateur : palette NBA bleu/blanc/rouge + mode sombre bleu/noir/rouge, contrastes **WCAG AAA**, calendrier fait maison (pas l'`<input type="date">`), animations fluides, vrais graphiques (pas juste « 60 % »). Choix de l'utilisateur : fiche match sur une **page dédiée** `/match/[id]`, et une page **« Le modèle »**.
+
+### Côté API / données
+- `team_state.py` : chaque match de `recent_games` a en plus `opponent_id` et `elo_before` ; nouveau `elo_history` (`{date, elo}` après chacun des 30 derniers matchs, Elo après match recalculé avec `features_lib.elo_update`). Affichage uniquement, pas des features. L'API reste compatible avec un ancien `team_state.json` (champs manquants → `null`/`[]`).
+- `train_model.py` écrit `model_metrics.json` (accuracy/log loss des 2 modèles, baseline, importances XGBoost, courbe de calibration en 10 tranches). Réentraîné le 2026-09-28 : modèle identique (écart de prédiction 0,0), 68,6 % / 69,6 %.
+- `predictor_service.py` : `GamePrediction` gagne `elo_home_probability` (Elo seul), `factors` et `base_value`. Les facteurs sont les contributions XGBoost de type SHAP (`get_booster().predict(DMatrix, pred_contribs=True)`, en log-odds) sommées par famille (`FACTOR_FAMILIES` : Elo, bilan dom./ext., forme, bilan saison, Net Rating, attaque, défense, repos). Vérifié : sigmoïde(biais + somme) = `home_win_probability`. Nouveau `team_snapshot()` (stats + bilans V-D + derniers matchs + `elo_history`) ; la logique de changement de saison est factorisée dans `_season_context()`.
+- `schedule_service.py` : `team_ref` (public), `find_game()`, `covered_dates()`.
+- `routers/games.py` réécrit (même contrat pour `/games/today`, enrichi de `elo`, `record`, `last_results` par équipe et `prediction.elo_home_probability`) ; `routers/model.py` nouveau.
+
+### Côté front
+- **Palette** : chaque couleur déclarée une fois en `light-dark(clair, sombre)` dans `globals.css` ; `color-scheme` suit le système sans JS, le bouton Clair/Sombre/Auto pose `data-theme` sur `<html>` (localStorage `theme`, script inline anti-flash dans `layout.js`). Le rouge NBA `#C8102E` (5,9:1) n'est jamais utilisé pour du texte (`--danger-text` pour ça). **Toute modification de couleur → `npm run check:contrast`.** Séries des graphiques (domicile bleu `--home`, extérieur rouge `--away`) validées avec le validateur de palette du skill dataviz (daltonisme, bande de luminosité) dans les 2 thèmes.
+- **Polices** : Inter (texte) + Barlow Condensed (titres, tricodes, scores).
+- **Animations** : `motion` (dépendance ajoutée). `<MotionConfig reducedMotion="user">` + `useChartTransition()` (les attributs SVG animés ne sont pas couverts par MotionConfig) + media query CSS.
+- **Graphiques** : SVG/HTML maison, pas de bibliothèque. Chacun a un `aria-label`, une vue « Voir les données » (tableau) et, pour les courbes/colonnes, une infobulle au survol.
+- **Calendrier** : bandeau de 14 jours (pastille = jour avec matchs, via `/games/calendar`) + grille mensuelle (flèches, Début/Fin, Page préc./suiv., Entrée, Échap, focus rendu au bouton). Jours non synchronisés désactivés si `live_fallback` est faux (VPS). Date dans l'URL (`/?date=`).
+- Vérifié : `eslint`, `next build`, contrastes, captures Chrome headless des 3 pages (clair, sombre, 375 px sans débordement), navigation clavier du calendrier pilotée par CDP. **Non vérifié** : lecteur d'écran réel, Safari/Firefox.
+
 ## Déploiement (cible : VPS personnel)
 
 L'utilisateur dispose d'un **VPS personnel** et y hébergera le projet complet (front + API + pipeline data). Pas de Vercel ni de PaaS : tout tourne sur la même machine. Rien n'est encore déployé.
@@ -522,8 +552,9 @@ docker run --rm python:3.12-slim sh -c "pip install -q nba_api && python -c \"fr
 4. Tester `/games/today` (et le sélecteur de date du front) avec de VRAIS matchs programmés dès le retour de la saison régulière NBA (mi-octobre 2026) — jusque-là, le paramètre `?date=` ne permet qu'un test partiel (Elo/forme actuels appliqués à une date passée, voir limite documentée dans "Adaptation front" plus haut).
 5. (Optionnel) Poursuivre l'optimisation ML si le temps le permet : tuning XGBoost (GridSearch/early stopping), validation croisée temporelle multi-saisons pour vérifier la robustesse du gain Elo (actuellement mesuré sur une seule saison de test), affiner le calcul du Net Rating (ratio de sommes plutôt que moyenne de ratios, pour réduire le bruit). Amélioration possible aussi sur le score approximatif prédit (actuellement une heuristique simple, pas un vrai modèle de régression).
 6. (Prérequis du déploiement VPS) Dockeriser l'API et le service data (`infra/docker-compose.yml`). Prérequis : l'API importe `data/preprocessing/features_lib.py` via `sys.path` et lit `data/processed/` + `data/models/saved_models/` → l'image API doit embarquer (ou monter) ces dossiers de `data/`.
-7. (Prérequis du déploiement VPS) Sortir la config en dur : URL de l'API dans `front/src/services/api.js` (→ `NEXT_PUBLIC_API_URL`) et origines CORS dans `api/app/main.py` (→ `api/app/core/config.py`, actuellement vide). Indispensable avant tout déploiement.
-8. (Optionnel, UX) Ajouter un état de chargement/skeleton plus soigné dans `page.js` que le simple texte "Chargement..." actuel.
+7. (Prérequis du déploiement VPS) Sortir la config en dur : ~~URL de l'API dans `front/src/services/api.js`~~ (FAIT : `NEXT_PUBLIC_API_URL`, à fixer AU BUILD) ; reste les origines CORS dans `api/app/main.py` (→ `api/app/core/config.py`). Indispensable avant tout déploiement.
+8. ~~(Optionnel, UX) skeleton de chargement~~ : fait avec la refonte UI.
+10. (Modèle) `rest_days` hors distribution : sur une date passée interrogée avec l'état actuel, il est NÉGATIF ; en début de saison il vaut ~170 jours (intersaison) alors qu'à l'entraînement il dépasse rarement quelques jours. Le front masque les valeurs négatives (« n/d »), mais le modèle les reçoit telles quelles. À traiter (écrêtage identique entraînement/prédiction dans features_lib.py) avant la reprise de la saison régulière.
 9. Écrire `README.md` et `docs/architecture.md` (tous deux vides) — important pour un projet portfolio.
 
 ## Comment relancer le projet en local
@@ -549,7 +580,18 @@ cd front
 npm run dev
 ```
 
-→ `http://localhost:3000`
+→ `http://localhost:3000` (ex. `/?date=2026-10-05` pour un jour avec matchs, `/modele`)
+
+⚠️ **Port 8000 occupé** sur le PC de l'utilisateur par un serveur Symfony (autre projet, constaté le 2026-09-28). Dans ce cas, lancer l'API sur un autre port et le dire au front :
+
+```powershell
+uvicorn app.main:app --reload --port 8001          # dans api/, venv activé
+$env:NEXT_PUBLIC_API_URL = "http://127.0.0.1:8001"; npm run dev   # dans front/
+```
+
+`NEXT_PUBLIC_API_URL` est lu au démarrage de `next dev` et figé AU BUILD pour `next build`. CORS : le front doit rester sur `localhost:3000`.
+
+**Contrôles front :** `npm run lint`, `npm run build`, `npm run check:contrast` (à relancer après toute modification de couleur dans `globals.css`).
 
 **Pipeline ML (à relancer si les CSV sources changent) :**
 
