@@ -74,7 +74,6 @@ nba-predictor/
 │
 ├── front/                          # Next.js + Tailwind — ADAPTÉ au nouveau format cette session (voir "Adaptation front" plus bas)
 │   ├── src/
-│   │   ├── app/
 │   │   ├── app/                    # voir "Refonte UI" plus bas
 │   │   │   ├── layout.js           # polices (Inter + Barlow Condensed), script de thème anti-flash, Header, lien d'évitement
 │   │   │   ├── template.js         # fondu d'entrée des pages (motion)
@@ -85,11 +84,14 @@ nba-predictor/
 │   │   ├── components/
 │   │   │   ├── calendar/           # DatePicker (bandeau de jours) + CalendarPopover (grille mensuelle clavier) + dayStatus
 │   │   │   ├── charts/             # graphiques SVG/HTML maison animés (motion) : ProbabilityBar, WinGauge, FactorsChart, ComparisonBars, FormChart, EloLine, ModelCharts, DataTable, Tooltip
-│   │   │   ├── GameCard.js, DaySummary.js, TeamBits.js, States.js, Header.js, ThemeToggle.js, Providers.js
+│   │   │   ├── TeamBits.js         # TeamBadge (logo, sinon tricode), FormPills, PreseasonBadge
+│   │   │   ├── GameCard.js, DaySummary.js, States.js, Header.js, ThemeToggle.js, Providers.js
 │   │   ├── lib/                    # format.js (dates/nombres fr-FR), useApi.js (fetch + états), charts.js (échelles, useWidth, transitions)
 │   │   └── services/
 │   │       └── api.js              # getGames, getGame, getCalendar, getModelMetrics ; base = NEXT_PUBLIC_API_URL (défaut http://127.0.0.1:8000)
+│   ├── public/logos/               # logos des 30 équipes, {team_id}-L.svg (fond clair) / -D.svg (fond sombre), VERSIONNÉS
 │   ├── scripts/check-contrast.mjs  # `npm run check:contrast` : toutes les paires de couleurs >= 7:1 (texte) / 3:1 (graphiques)
+│   ├── scripts/fetch-logos.mjs     # `npm run fetch:logos` : (re)télécharge public/logos/ depuis cdn.nba.com
 │   ├── package.json
 │   └── postcss.config.mjs          # Tailwind v4 : config "CSS-first" (@import "tailwindcss" dans globals.css), PAS de tailwind.config.js
 │
@@ -415,6 +417,7 @@ Validé visuellement côté utilisateur : cartes affichées correctement avec no
     - Vérifié : synchro complète en local (`-NoPush`), 6 scénarios du routeur, connexion SSH par clé vers `ubuntu@remicoimbra.fr`, `eslint` sur `GameCard.js`. **Pas testé** : envoi réel vers le VPS, tâche planifiée, badge vu dans le navigateur.
 
 13. **Refonte UI (2026-09-28)** : voir "Refonte UI" ci-dessous.
+14. **Logos des équipes (2026-09-29)** : voir "Logos des équipes" dans "Refonte UI" ci-dessous.
 
 ## Refonte UI (2026-09-28)
 
@@ -434,6 +437,15 @@ Demande de l'utilisateur : palette NBA bleu/blanc/rouge + mode sombre bleu/noir/
 - **Graphiques** : SVG/HTML maison, pas de bibliothèque. Chacun a un `aria-label`, une vue « Voir les données » (tableau) et, pour les courbes/colonnes, une infobulle au survol.
 - **Calendrier** : bandeau de 14 jours (pastille = jour avec matchs, via `/games/calendar`) + grille mensuelle (flèches, Début/Fin, Page préc./suiv., Entrée, Échap, focus rendu au bouton). Jours non synchronisés désactivés si `live_fallback` est faux (VPS). Date dans l'URL (`/?date=`).
 - Vérifié : `eslint`, `next build`, contrastes, captures Chrome headless des 3 pages (clair, sombre, 375 px sans débordement), navigation clavier du calendrier pilotée par CDP. **Non vérifié** : lecteur d'écran réel, Safari/Firefox.
+- ⚠️ Captures Chrome headless (`--screenshot --virtual-time-budget`) : elles ressortent parfois vides ou sans les cartes (animations `motion` et fondu de `template.js` pas terminés), alors que l'API a bien répondu 200. Relancer, ou vérifier dans un vrai navigateur, avant de conclure à un bug.
+
+### Logos des équipes (2026-09-29)
+- **Source** : `cdn.nba.com/logos/nba/{team_id}/global/{L|D}/logo.svg` (ni `nba_api` ni notre API ne fournissent d'images). Variante `L` pour fond clair, `D` pour fond sombre (différente pour 10 équipes sur 30).
+- **Servis par le front, pas pris directement sur le site NBA** : `cdn.nba.com` est bloqué depuis le réseau de l'IUT et depuis le VPS, le navigateur du visiteur ne doit donc pas en dépendre. Les 60 SVG (~740 Ko) sont **versionnés** dans `front/public/logos/` pour qu'un `git clone` suffise au déploiement. `npm run fetch:logos` les retélécharge (depuis le PC, le VPS étant bloqué).
+- `TeamBadge` (`TeamBits.js`) : logo dans la pastille colorée domicile/extérieur, les deux variantes rendues avec `dark:hidden` / `hidden dark:block`. Les ID des 30 franchises se suivent (`1610612737` → `1610612766`) : hors de cette plage (club étranger en présaison) ou si le fichier manque (`onError`), le tricode s'affiche comme avant. `next/image` avec `unoptimized` (SVG, pas d'optimisation ni de `dangerouslyAllowSVG`).
+- `globals.css` : variante Tailwind `dark:` (`@custom-variant`) qui suit `data-theme` ET le thème système quand aucun choix manuel n'est fait. À utiliser seulement pour ce que `light-dark()` ne couvre pas (choix d'image).
+- Contour clair autour des logos foncés en mode sombre (Memphis, Orlando) : essayé puis **écarté**, il rend flou le texte des logos ; sans lui ils restent lisibles.
+- Vérifié : `eslint`, `next build`, CSS `dark:` généré, les 30 logos sur les 4 fonds de pastille, page d'accueil et fiche match en sombre avec les vraies données. **Non vérifié** : page complète en thème clair dans le navigateur (captures headless vides, voir ci-dessus).
 
 ## Déploiement (cible : VPS personnel)
 
@@ -591,7 +603,7 @@ $env:NEXT_PUBLIC_API_URL = "http://127.0.0.1:8001"; npm run dev   # dans front/
 
 `NEXT_PUBLIC_API_URL` est lu au démarrage de `next dev` et figé AU BUILD pour `next build`. CORS : le front doit rester sur `localhost:3000`.
 
-**Contrôles front :** `npm run lint`, `npm run build`, `npm run check:contrast` (à relancer après toute modification de couleur dans `globals.css`).
+**Contrôles front :** `npm run lint`, `npm run build`, `npm run check:contrast` (à relancer après toute modification de couleur dans `globals.css`). `npm run fetch:logos` retélécharge les logos des équipes (rarement utile).
 
 **Pipeline ML (à relancer si les CSV sources changent) :**
 
