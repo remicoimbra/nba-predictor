@@ -54,6 +54,21 @@
   color-scheme: dark;
 }
 
+/*
+ * Variante `dark:` pour ce que light-dark() ne couvre pas (ex. choisir entre
+ * deux images) : thème sombre forcé, ou thème système sombre sans choix manuel.
+ */
+@custom-variant dark {
+  &:where([data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+}
+
 @theme inline {
   --color-bg: var(--bg);
   --color-surface: var(--surface);

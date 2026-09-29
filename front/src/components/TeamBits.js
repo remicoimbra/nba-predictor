@@ -1,8 +1,24 @@
+"use client";
+
 // Petits éléments d'identité d'équipe, partagés entre cartes et fiche match.
 
-// Pastille du tricode, teintée selon le camp (domicile bleu / extérieur rouge).
+import Image from "next/image";
+import { useState } from "react";
+
+// Logos servis depuis public/logos/ (`npm run fetch:logos`). Les ID NBA des
+// 30 franchises se suivent ; les autres (clubs étrangers en présaison) n'ont
+// pas de logo et gardent leur tricode.
+const FIRST_TEAM_ID = 1610612737;
+const LAST_TEAM_ID = 1610612766;
+
+// Pastille de l'équipe (logo, sinon tricode), teintée selon le camp
+// (domicile bleu / extérieur rouge).
 export function TeamBadge({ team, side, size = "md" }) {
-  const sizes = size === "lg" ? "h-16 w-16 text-2xl" : "h-12 w-12 text-lg";
+  const [brokenId, setBrokenId] = useState(null);
+  const large = size === "lg";
+  const sizes = large ? "h-16 w-16 text-2xl" : "h-12 w-12 text-lg";
+  const logoPx = large ? 48 : 36;
+  const hasLogo = team.id >= FIRST_TEAM_ID && team.id <= LAST_TEAM_ID && brokenId !== team.id;
   return (
     <span
       aria-hidden="true"
@@ -11,7 +27,23 @@ export function TeamBadge({ team, side, size = "md" }) {
       }`}
       style={{ boxShadow: `inset 0 -3px 0 ${side === "home" ? "var(--home)" : "var(--away)"}` }}
     >
-      {team.tricode}
+      {hasLogo ? (
+        // Variante L sur fond clair, D (couleurs ajustées) sur fond sombre.
+        ["L", "D"].map((variant) => (
+          <Image
+            key={variant}
+            src={`/logos/${team.id}-${variant}.svg`}
+            alt=""
+            width={logoPx}
+            height={logoPx}
+            unoptimized
+            className={variant === "L" ? "dark:hidden" : "hidden dark:block"}
+            onError={() => setBrokenId(team.id)}
+          />
+        ))
+      ) : (
+        team.tricode
+      )}
     </span>
   );
 }
