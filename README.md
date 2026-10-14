@@ -1,0 +1,107 @@
+# NBA Predictor
+
+Application web qui prédit l'issue des matchs NBA : probabilité de victoire, score estimé, et surtout **l'explication** de chaque prédiction (quelles statistiques ont pesé, et dans quel sens).
+
+Projet personnel réalisé en BUT MMI (parcours Dev) pour travailler un projet complet de bout en bout : collecte de données, machine learning, API REST et interface web.
+
+![Matchs du jour, thème clair](docs/screenshots/accueil-clair.png)
+
+## Ce que fait l'application
+
+- **Matchs du jour** : un bandeau de 14 jours et un calendrier mensuel au clavier, avec pour chaque match la probabilité de victoire, le score estimé et la forme récente des deux équipes.
+- **Fiche match** : pourquoi le modèle prédit ce résultat (contributions de type SHAP regroupées par famille de statistiques), comparaison côte à côte des deux équipes, courbes de forme et d'évolution de l'Elo.
+- **Page « Le modèle »** : précision, log loss, courbe de calibration et importance des variables, lues directement dans les résultats du dernier entraînement.
+- **Accessibilité** : couleurs vérifiées au contraste WCAG AAA (`npm run check:contrast`), thème clair et sombre, navigation au clavier, tableau de données alternatif pour chaque graphique, animations réduites si le système le demande.
+
+| Fiche match (sombre) | Page « Le modèle » |
+| --- | --- |
+| ![Fiche match](docs/screenshots/match-sombre.png) | ![Le modèle](docs/screenshots/modele-clair.png) |
+
+## Résultats du modèle
+
+Entraînement sur 6 saisons (2019-20 à 2024-25), **test sur la saison 2025-26 que le modèle n'a jamais vue** (1 186 matchs). Le découpage est strictement chronologique : aucune information du futur n'entre dans une feature.
+
+| Modèle | Précision | Log loss |
+| --- | --- | --- |
+| Règle naïve « le domicile gagne » | 55,1 % | n/a |
+| Régression logistique | 69,0 % | 0,595 |
+| XGBoost (utilisé par l'API) | 68,9 % | 0,602 |
+
+Les deux modèles font jeu égal : l'écart entre eux est inférieur au bruit statistique d'un échantillon de 1 186 matchs. La variable de loin la plus utile est la **différence de rating Elo** entre les deux équipes ; c'est elle qui a fait passer la précision de 66,8 % à près de 69 % pendant le développement.
+
+**Limites assumées** : le modèle ignore les blessures, les transferts et les joueurs absents. Le score affiché est une heuristique (forme offensive et défensive récente), pas un modèle de régression : le modèle ne sait que classer victoire ou défaite. En tout début de saison, `win_pct` n'a pas encore de valeur, et les premières prédictions reposent surtout sur l'Elo et la forme de fin de saison précédente.
+
+## Architecture
+
+```
+nba_api ──> data/ (collecte, nettoyage, features, entraînement)
+                 │  fichiers JSON/CSV + modèle .pkl
+                 ▼
+            api/ (FastAPI : prédiction à la demande)
+                 │  JSON
+                 ▼
+            front/ (Next.js + Tailwind : tableau de bord)
+```
+
+| Dossier | Rôle | Stack |
+| --- | --- | --- |
+| [data/](data/) | Collecte, nettoyage, feature engineering, entraînement | Python, pandas, scikit-learn, XGBoost, `nba_api` |
+| [api/](api/) | Sert les prédictions et les métriques | FastAPI, uvicorn |
+| [front/](front/) | Interface web, graphiques SVG maison | Next.js (App Router), Tailwind CSS v4, `motion` |
+| [infra/](infra/) | Synchronisation quotidienne des données vers le serveur | PowerShell, SSH |
+
+Le détail (choix techniques, flux de données, pièges rencontrés) est dans [docs/architecture.md](docs/architecture.md).
+
+## Lancer le projet en local
+
+Prérequis : Python 3.12 ou plus récent, Node.js 20 ou plus récent.
+
+Les données et le modèle ne sont pas versionnés : il faut d'abord générer les fichiers (quelques minutes, le téléchargement dépend de `stats.nba.com`).
+
+```powershell
+# 1. Données + modèle
+cd data
+python -m venv ..\api\venv ; ..\api\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python collectors\fetch_games.py
+python preprocessing\clean_data.py
+python preprocessing\feature_engineering.py
+python models\train_model.py
+python preprocessing\team_state.py
+python collectors\fetch_schedule.py
+
+# 2. API (http://127.0.0.1:8000/docs)
+cd ..\api
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+
+# 3. Front (http://localhost:3000), dans un autre terminal
+cd front
+npm install
+npm run dev
+```
+
+Si le port 8000 est pris, lancer l'API avec `--port 8001` et le front avec `$env:NEXT_PUBLIC_API_URL = "http://127.0.0.1:8001"`. Le front doit rester sur `localhost:3000` (origine autorisée par CORS).
+
+Pour mettre à jour les matchs et le calendrier au quotidien, sans réentraîner : `.\infra\sync_to_vps.ps1 -NoPush`.
+
+Contrôles du front : `npm run lint`, `npm run build`, `npm run check:contrast`.
+
+## Endpoints de l'API
+
+| Route | Description |
+| --- | --- |
+| `GET /games/today?date=AAAA-MM-JJ` | Matchs d'un jour (aujourd'hui par défaut) avec prédiction |
+| `GET /games/calendar` | Jours disponibles et nombre de matchs |
+| `GET /games/{game_id}` | Fiche complète d'un match : facteurs, statistiques, historique d'Elo |
+| `GET /model/metrics` | Résultats du dernier entraînement |
+
+## État d'avancement
+
+Fait : collecte, features, modèle, API, interface complète (3 pages), synchronisation quotidienne du calendrier et des données.
+
+À faire : déploiement sur serveur (Docker Compose et reverse proxy), base de données (les fichiers JSON et CSV en tiennent lieu pour l'instant), endpoints `teams` et `predictions`.
+
+## Données
+
+Les données viennent de [`nba_api`](https://github.com/swar/nba_api), qui interroge `stats.nba.com`. Les logos des équipes appartiennent à la NBA et à leurs franchises ; ils servent ici uniquement à l'illustration. Projet non affilié à la NBA.
