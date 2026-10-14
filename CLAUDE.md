@@ -102,9 +102,10 @@ nba-predictor/
 │   └── sync_to_vps.ps1             # FAIT (2026-09-28) — synchro quotidienne PC → VPS, voir "Déploiement"
 │
 ├── docs/
-│   └── architecture.md             # à compléter (peut reprendre le contenu de ce fichier)
+│   ├── architecture.md             # FAIT (2026-10-14) — pipeline, choix techniques, pièges, déploiement
+│   └── screenshots/                # captures du README (accueil, fiche match, modèle ; clair/sombre), VERSIONNÉES
 │
-└── README.md
+└── README.md                       # FAIT (2026-10-14)
 ```
 
 ## Choix faits lors du setup Next.js (`create-next-app`)
@@ -262,7 +263,10 @@ Réécrit en profondeur cette session, en 3 vagues successives :
 | Baseline ("home gagne toujours")                  | 55,1%           | —                | —                   |
 | v1 (win_pct global, avg_pts_last5, rest_days)     | 66,75%          | 67,4%            | 0,605               |
 | v3 sans Elo (+ Pace/Net Rating + win_pct_context) | 66,4%           | 67,6%            | 0,606               |
-| **v3 + Elo + scaling LogReg (état final)**        | **68,6%**       | **69,6%**        | **0,596**           |
+| v3 + Elo + scaling LogReg                         | 68,6%           | 69,6%            | 0,596               |
+| **+ `rest_days` plafonné à 7 j (état final, 2026-10-14)** | **69,0%** | **68,9%**   | **0,595** (LogReg)  |
+
+(Le passage de 69,6 % à 68,9 % pour XGBoost n'est pas une régression réelle : sur 5 graines, XGBoost fait 69,1 % sans plafond contre 68,6 % avec, écart-type 0,4 pt ; l'IC à 95 % d'une accuracy sur 1 186 matchs est d'environ ±2,7 pts. Les deux modèles sont à égalité.)
 
 **Feature la plus importante dans les deux modèles : `diff_elo`** (loin devant `diff_win_pct`, qui était dominante avant l'ajout de l'Elo). `diff_net_rtg_last10` reste un signal solide en 2ᵉ position. `win_pct_context` apporte un complément modeste mais réel.
 
@@ -418,6 +422,7 @@ Validé visuellement côté utilisateur : cartes affichées correctement avec no
 
 13. **Refonte UI (2026-09-28)** : voir "Refonte UI" ci-dessous.
 14. **Logos des équipes (2026-09-29)** : voir "Logos des équipes" dans "Refonte UI" ci-dessous.
+15. **Plafond `rest_days` + documentation (2026-10-14)** : voir "Plafond des jours de repos" ci-dessous.
 
 ## Refonte UI (2026-09-28)
 
@@ -425,7 +430,7 @@ Demande de l'utilisateur : palette NBA bleu/blanc/rouge + mode sombre bleu/noir/
 
 ### Côté API / données
 - `team_state.py` : chaque match de `recent_games` a en plus `opponent_id` et `elo_before` ; nouveau `elo_history` (`{date, elo}` après chacun des 30 derniers matchs, Elo après match recalculé avec `features_lib.elo_update`). Affichage uniquement, pas des features. L'API reste compatible avec un ancien `team_state.json` (champs manquants → `null`/`[]`).
-- `train_model.py` écrit `model_metrics.json` (accuracy/log loss des 2 modèles, baseline, importances XGBoost, courbe de calibration en 10 tranches). Réentraîné le 2026-09-28 : modèle identique (écart de prédiction 0,0), 68,6 % / 69,6 %.
+- `train_model.py` écrit `model_metrics.json` (accuracy/log loss des 2 modèles, baseline, importances XGBoost, courbe de calibration en 10 tranches). Réentraîné le 2026-09-28 : modèle identique (écart de prédiction 0,0), 68,6 % / 69,6 % ; réentraîné le 2026-10-14 avec le plafond de repos : 69,0 % / 68,9 %.
 - `predictor_service.py` : `GamePrediction` gagne `elo_home_probability` (Elo seul), `factors` et `base_value`. Les facteurs sont les contributions XGBoost de type SHAP (`get_booster().predict(DMatrix, pred_contribs=True)`, en log-odds) sommées par famille (`FACTOR_FAMILIES` : Elo, bilan dom./ext., forme, bilan saison, Net Rating, attaque, défense, repos). Vérifié : sigmoïde(biais + somme) = `home_win_probability`. Nouveau `team_snapshot()` (stats + bilans V-D + derniers matchs + `elo_history`) ; la logique de changement de saison est factorisée dans `_season_context()`.
 - `schedule_service.py` : `team_ref` (public), `find_game()`, `covered_dates()`.
 - `routers/games.py` réécrit (même contrat pour `/games/today`, enrichi de `elo`, `record`, `last_results` par équipe et `prediction.elo_home_probability`) ; `routers/model.py` nouveau.
@@ -446,6 +451,14 @@ Demande de l'utilisateur : palette NBA bleu/blanc/rouge + mode sombre bleu/noir/
 - `globals.css` : variante Tailwind `dark:` (`@custom-variant`) qui suit `data-theme` ET le thème système quand aucun choix manuel n'est fait. À utiliser seulement pour ce que `light-dark()` ne couvre pas (choix d'image).
 - Contour clair autour des logos foncés en mode sombre (Memphis, Orlando) : essayé puis **écarté**, il rend flou le texte des logos ; sans lui ils restent lisibles.
 - Vérifié : `eslint`, `next build`, CSS `dark:` généré, les 30 logos sur les 4 fonds de pastille, page d'accueil et fiche match en sombre avec les vraies données. **Non vérifié** : page complète en thème clair dans le navigateur (captures headless vides, voir ci-dessus).
+
+### Plafond des jours de repos (2026-10-14)
+- `features_lib.REST_DAYS_CAP = 7`, appliqué à l'entraînement (`feature_engineering.py`, `.clip(upper=...)`) ET en prédiction (`features_lib.rest_days()`). Avant : les ~100 matchs d'ouverture de saison de l'historique avaient 130-288 jours de repos (intersaison, bulle 2020) et un match de reprise de saison était prédit avec ~170 jours.
+- `rest_days()` renvoie `None` (→ NaN) quand la date demandée précède le dernier match connu (avant : nombre négatif). Le `valid: v >= 0` de `ComparisonBars.js` devient inutile mais reste inoffensif.
+- Réentraîné : voir tableau de résultats (68,9 % XGBoost / 69,0 % LogReg). Mesure de sensibilité (5 graines, plafonds none/14/7/5/3, et sans la variable) : toutes les variantes sont dans le bruit ; le plafond ne coûte rien de mesurable.
+- Vérifié : prédiction BOS–DEN le 2026-10-22 → repos 7/7 ; sur 2026-01-15 → repos `None`. `team_state.json` n'est pas affecté (il stocke `last_game_date`).
+- Observation, NON traitée : `train_model.prepare()` supprime 265 lignes (premiers matchs de chaque équipe/saison, `win_pct` ou `win_pct_context` manquants), donc le modèle n'a presque jamais vu `win_pct` = NaN, ce qui est le cas des 1ers matchs de la saison en live. Test : entraîner AVEC ces lignes n'aide pas (265 lignes seulement) ; sur les 39 matchs concernés de 2025-26, le modèle fait 58 % contre 62 % pour l'Elo seul (échantillon trop petit pour conclure). Piste si les premiers matchs de 2026-27 paraissent trop tranchés : rapprocher la proba de `elo_home_probability` tant que `win_pct` est manquant.
+- `schedule.json` régénéré le 2026-10-14 (J-3 → J+14) : la saison régulière 2026-27 commence le **2026-10-22** (2 matchs), 12 matchs le 2026-10-23. Vrais matchs de saison régulière prédits et affichés dans le navigateur (accueil clair/sombre, fiche match, page modèle).
 
 ## Déploiement (cible : VPS personnel)
 
@@ -566,8 +579,8 @@ docker run --rm python:3.12-slim sh -c "pip install -q nba_api && python -c \"fr
 6. (Prérequis du déploiement VPS) Dockeriser l'API et le service data (`infra/docker-compose.yml`). Prérequis : l'API importe `data/preprocessing/features_lib.py` via `sys.path` et lit `data/processed/` + `data/models/saved_models/` → l'image API doit embarquer (ou monter) ces dossiers de `data/`.
 7. (Prérequis du déploiement VPS) Sortir la config en dur : ~~URL de l'API dans `front/src/services/api.js`~~ (FAIT : `NEXT_PUBLIC_API_URL`, à fixer AU BUILD) ; reste les origines CORS dans `api/app/main.py` (→ `api/app/core/config.py`). Indispensable avant tout déploiement.
 8. ~~(Optionnel, UX) skeleton de chargement~~ : fait avec la refonte UI.
-10. (Modèle) `rest_days` hors distribution : sur une date passée interrogée avec l'état actuel, il est NÉGATIF ; en début de saison il vaut ~170 jours (intersaison) alors qu'à l'entraînement il dépasse rarement quelques jours. Le front masque les valeurs négatives (« n/d »), mais le modèle les reçoit telles quelles. À traiter (écrêtage identique entraînement/prédiction dans features_lib.py) avant la reprise de la saison régulière.
-9. Écrire `README.md` et `docs/architecture.md` (tous deux vides) — important pour un projet portfolio.
+10. ~~(Modèle) `rest_days` hors distribution~~ : FAIT le 2026-10-14 (plafond à 7 jours, voir "Plafond des jours de repos"). Reste à surveiller : premiers matchs de 2026-27 avec `win_pct` manquant (voir l'observation dans cette même section).
+9. ~~Écrire `README.md` et `docs/architecture.md`~~ : FAIT le 2026-10-14. À relire/ajuster à la main (le README parle à la première personne du projet, ajouter le lien de démo une fois déployé).
 
 ## Comment relancer le projet en local
 
