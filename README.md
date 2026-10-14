@@ -4,6 +4,8 @@ Application web qui prédit l'issue des matchs NBA : probabilité de victoire, s
 
 Projet personnel réalisé en BUT MMI (parcours Dev) pour travailler un projet complet de bout en bout : collecte de données, machine learning, API REST et interface web.
 
+**En ligne : [nba.remicoimbra.fr](https://nba.remicoimbra.fr)**
+
 ![Matchs du jour, thème clair](docs/screenshots/accueil-clair.png)
 
 ## Ce que fait l'application
@@ -96,11 +98,13 @@ Contrôles du front : `npm run lint`, `npm run build`, `npm run check:contrast`.
 | `GET /games/{game_id}` | Fiche complète d'un match : facteurs, statistiques, historique d'Elo |
 | `GET /model/metrics` | Résultats du dernier entraînement |
 
+En production, ces routes sont servies sous `/api` (par exemple `https://nba.remicoimbra.fr/api/games/calendar`).
+
 ## État d'avancement
 
-Fait : collecte, features, modèle, API, interface complète (3 pages), synchronisation quotidienne du calendrier et des données.
+Fait : collecte, features, modèle, API, interface complète (3 pages), synchronisation quotidienne du calendrier et des données, déploiement sur un VPS (voir [docs/deploiement.md](docs/deploiement.md)).
 
-À faire : déploiement sur serveur (Docker Compose et reverse proxy), base de données (les fichiers JSON et CSV en tiennent lieu pour l'instant), endpoints `teams` et `predictions`.
+À faire : base de données (les fichiers JSON et CSV en tiennent lieu pour l'instant), endpoints `teams` et `predictions`.
 
 ## Données
 

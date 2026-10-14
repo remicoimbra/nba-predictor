@@ -80,7 +80,7 @@ Le modèle ne classe que victoire ou défaite. Le score affiché vient d'une heu
 
 Next.js (App Router), JavaScript, Tailwind CSS v4 (configuration dans `globals.css`, pas de `tailwind.config.js`).
 
-- **Pages** : `/` (matchs du jour, date dans l'URL), `/match/[id]`, `/modele`.
+- **Pages** : `/` (matchs du jour, date dans l'URL), `/match?id=…&date=…`, `/modele`. Le front est un export statique (`output: "export"`) : aucune route dynamique côté serveur, d'où l'identifiant du match en paramètre plutôt que dans le chemin.
 - **Couleurs** : chaque couleur est déclarée une fois en `light-dark(clair, sombre)`. `npm run check:contrast` vérifie toutes les paires (7:1 pour le texte, 3:1 pour les graphiques) : à relancer après toute modification de couleur. Le rouge NBA n'est jamais utilisé pour du texte (contraste insuffisant).
 - **Graphiques** : SVG et HTML maison, sans bibliothèque. Chacun a un `aria-label`, un tableau de données alternatif (« Voir les données ») et une infobulle au survol.
 - **Animations** : `motion`, avec respect de `prefers-reduced-motion`.
@@ -98,9 +98,11 @@ PC (tâche planifiée Windows, 1 fois par jour)
         ▼
 Serveur : data/processed/team_state.json + schedule.json
         ▲ relus automatiquement par l'API quand leur date de modification change
-Internet ──HTTPS──> reverse proxy ──> /    front Next.js
-                                  └─> /api API FastAPI (NBA_LIVE_SCHEDULE_FALLBACK=0)
+Internet ──HTTPS──> Caddy ──> /     fichiers statiques du front (export Next.js)
+                          └─> /api  API FastAPI, service systemd isolé (NBA_LIVE_SCHEDULE_FALLBACK=0)
 ```
+
+Détails du déploiement (isolation de l'API, redéploiement, retour arrière) : [deploiement.md](deploiement.md).
 
 L'API sur le serveur ne fait aucun appel réseau vers la NBA. Si le PC reste éteint plusieurs jours, les prédictions s'appuient sur un état de plus en plus ancien, puis le calendrier ne couvre plus la date du jour (404) : le service se dégrade, il ne tombe pas.
 

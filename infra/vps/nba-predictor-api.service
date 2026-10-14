@@ -1,0 +1,81 @@
+# API FastAPI de NBA Predictor, derrière Caddy (voir docs/deploiement.md).
+#
+# Installation sur le VPS (une fois) :
+#   sudo install -m 644 nba-predictor-api.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable nba-predictor-api
+# Déploiements : infra/deploy_to_vps.ps1 (depuis le PC), qui redémarre le service.
+#
+# Pourquoi ce bac à sable : l'API est exposée à tout Internet via Caddy, sur
+# une machine partagée avec d'autres services. Une exécution de code dans
+# l'API (faille d'une dépendance) ne doit rien pouvoir lire, écrire ou
+# joindre d'autre que ce dont elle a besoin.
+
+[Unit]
+Description=NBA Predictor API (FastAPI)
+After=network.target
+
+[Service]
+Type=simple
+# Utilisateur jetable, créé au démarrage : pas de sudo, pas d'accès aux
+# fichiers d'ubuntu, pas de signal possible vers ses autres process.
+DynamicUser=yes
+WorkingDirectory=/home/ubuntu/nba-predictor/api
+# Le VPS n'a pas le droit d'appeler la NBA (IP bloquée) : calendrier lu
+# uniquement depuis schedule.json, date non synchronisée -> 404 immédiat.
+Environment=NBA_LIVE_SCHEDULE_FALLBACK=0
+# Même domaine que le front (Caddy relaie /api) : pas de CORS, pas de /docs.
+Environment=NBA_CORS_ORIGINS= NBA_API_DOCS=0
+Environment=TZ=Europe/Paris PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+# 127.0.0.4 et pas 127.0.0.1 : voir le filtrage IP plus bas. Pas de --reload.
+ExecStart=/home/ubuntu/nba-predictor/api/venv/bin/python -m uvicorn app.main:app --host 127.0.0.4 --port 8000 --no-server-header --no-access-log --limit-concurrency 50
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+
+# Ressources bornées : un afflux de requêtes ne doit pas affamer les autres
+# services de la machine (au plus un cœur sur deux).
+MemoryHigh=500M
+MemoryMax=800M
+CPUQuota=100%
+TasksMax=64
+
+# Fichiers : tout en lecture seule, et seul le dossier du projet est visible
+# dans /home. L'API n'écrit rien (team_state.json et schedule.json sont
+# déposés par la synchro, en dehors du service).
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindReadOnlyPaths=/home/ubuntu/nba-predictor
+PrivateTmp=yes
+PrivateDevices=yes
+UMask=0077
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Réseau. L'API n'a besoin de joindre PERSONNE : ni Internet, ni DNS, ni les
+# autres services locaux. Le filtre systemd ne voit que des adresses, pas des
+# ports, d'où deux adresses de bouclage dédiées : l'API écoute sur 127.0.0.4
+# et Caddy s'y connecte DEPUIS 127.0.0.5 (`local_address` dans le Caddyfile).
+# Tout le reste est refusé, en entrée comme en sortie.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+IPAddressDeny=any
+IPAddressAllow=127.0.0.5
+
+[Install]
+WantedBy=multi-user.target

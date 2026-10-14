@@ -23,7 +23,7 @@ Application hybride Python/JavaScript qui :
 | Back-End / API  | Python, FastAPI, uvicorn                                                  |
 | Base de données | PostgreSQL ou Supabase (pas encore branchée)                              |
 | Front-End       | Next.js (App Router) + Tailwind CSS, JavaScript (pas TypeScript)          |
-| Hébergement     | VPS personnel de l'utilisateur (pas encore déployé, voir "Déploiement")   |
+| Hébergement     | VPS personnel de l'utilisateur, **déployé le 2026-10-14** sur https://nba.remicoimbra.fr (voir "Déploiement") |
 
 ## Arborescence du projet
 
@@ -55,7 +55,7 @@ nba-predictor/
 │   ├── app/
 │   │   ├── main.py                 # FAIT (réécrit cette session) — squelette FastAPI + CORS, logique déportée dans routers/
 │   │   ├── core/
-│   │   │   ├── config.py           # FAIT (2026-09-28) — NBA_LIVE_SCHEDULE_FALLBACK (CORS/URL encore en dur ailleurs)
+│   │   │   ├── config.py           # FAIT — NBA_LIVE_SCHEDULE_FALLBACK, NBA_CORS_ORIGINS, NBA_API_DOCS (variables d'environnement, défauts = dev local)
 │   │   │   └── database.py         # à créer (connexion Supabase/Postgres)
 │   │   ├── models/                 # à créer (ORM SQLAlchemy)
 │   │   ├── schemas/                # à créer (schémas Pydantic)
@@ -79,7 +79,7 @@ nba-predictor/
 │   │   │   ├── template.js         # fondu d'entrée des pages (motion)
 │   │   │   ├── globals.css         # palette light-dark() des 2 thèmes (vérifiée AAA par scripts/check-contrast.mjs)
 │   │   │   ├── page.js             # matchs du jour → components/HomeView.js (sous Suspense, lit ?date=)
-│   │   │   ├── match/[id]/page.js  # fiche match → components/MatchView.js
+│   │   │   ├── match/page.js       # fiche match (/match?id=…&date=…) → components/MatchView.js
 │   │   │   └── modele/page.js      # page « Le modèle » → components/ModelView.js
 │   │   ├── components/
 │   │   │   ├── calendar/           # DatePicker (bandeau de jours) + CalendarPopover (grille mensuelle clavier) + dayStatus
@@ -95,14 +95,17 @@ nba-predictor/
 │   ├── package.json
 │   └── postcss.config.mjs          # Tailwind v4 : config "CSS-first" (@import "tailwindcss" dans globals.css), PAS de tailwind.config.js
 │
-├── infra/
-│   ├── docker-compose.yml          # fichier vide (à écrire)
-│   ├── Dockerfile.api              # fichier vide (à écrire)
-│   ├── Dockerfile.data             # fichier vide (probablement inutile : la synchro tourne sur le PC, pas sur le VPS)
-│   └── sync_to_vps.ps1             # FAIT (2026-09-28) — synchro quotidienne PC → VPS, voir "Déploiement"
+├── infra/                          # (pas de Docker : fichiers vides supprimés le 2026-10-14)
+│   ├── deploy_to_vps.ps1           # FAIT (2026-10-14) — déploiement PC → VPS (build front, code API, modèle), voir "Déploiement"
+│   ├── sync_to_vps.ps1             # FAIT (2026-09-28) — synchro quotidienne PC → VPS (team_state.json + schedule.json)
+│   └── vps/                        # fichiers installés sur le VPS (LF forcé par .gitattributes)
+│       ├── deploy_remote.sh        # partie serveur du déploiement (lancée par deploy_to_vps.ps1)
+│       ├── nba-predictor-api.service  # unité systemd de l'API (bac à sable + filtrage IP)
+│       └── nba.remicoimbra.fr.caddy   # copie de référence du bloc ajouté au Caddyfile du VPS
 │
 ├── docs/
 │   ├── architecture.md             # FAIT (2026-10-14) — pipeline, choix techniques, pièges, déploiement
+│   ├── deploiement.md              # FAIT (2026-10-14) — guide d'exploitation : redéployer, retour arrière, surveiller
 │   └── screenshots/                # captures du README (accueil, fiche match, modèle ; clair/sombre), VERSIONNÉES
 │
 └── README.md                       # FAIT (2026-10-14)
@@ -131,7 +134,7 @@ Ces choix conditionnent la structure du code, à respecter si on régénère ou 
 6. AUTOMATISATION (optionnel) → scheduler quotidien (cron / APScheduler)
 ```
 
-**État actuel du flux : les étapes 1 → 2 → 3 → 4 → 5 sont fonctionnelles et validées de bout en bout (1→2→3 sur données réelles, 7 saisons, 8 279 matchs ; 4 testée via TestClient + mocks côté Claude, et confirmée fonctionnelle en conditions réelles côté utilisateur ; 5 adaptée au nouveau format de réponse et testée visuellement côté utilisateur avec de vraies données, voir "Adaptation front" plus bas). `/games/today` sert désormais de VRAIES prédictions XGBoost, affichées correctement dans le dashboard. Depuis la refonte UI du 2026-09-28, le front a 3 pages (matchs du jour, fiche match avec graphiques explicatifs, page « Le modèle »), voir "Refonte UI". Aucune base de données n'est encore connectée (les CSV + `team_state.json` font office de BDD pour l'instant). L'étape 6 (automatisation) n'est toujours pas commencée : `team_state.json` doit pour l'instant être régénéré à la main (`python preprocessing/team_state.py`).**
+**État actuel du flux : les étapes 1 → 2 → 3 → 4 → 5 sont fonctionnelles et validées de bout en bout (1→2→3 sur données réelles, 7 saisons, 8 279 matchs ; 4 testée via TestClient + mocks côté Claude, et confirmée fonctionnelle en conditions réelles côté utilisateur ; 5 adaptée au nouveau format de réponse et testée visuellement côté utilisateur avec de vraies données, voir "Adaptation front" plus bas). `/games/today` sert désormais de VRAIES prédictions XGBoost, affichées correctement dans le dashboard. Depuis la refonte UI du 2026-09-28, le front a 3 pages (matchs du jour, fiche match avec graphiques explicatifs, page « Le modèle »), voir "Refonte UI". Aucune base de données n'est encore connectée (les CSV + `team_state.json` font office de BDD pour l'instant). L'étape 6 (automatisation) : `infra/sync_to_vps.ps1` enchaîne la mise à jour des données et l'envoi au VPS ; reste à le planifier côté utilisateur. Le site est en ligne depuis le 2026-10-14 (voir "Déploiement").**
 
 ## Schéma de base de données (cible, pas encore implémenté)
 
@@ -423,10 +426,11 @@ Validé visuellement côté utilisateur : cartes affichées correctement avec no
 13. **Refonte UI (2026-09-28)** : voir "Refonte UI" ci-dessous.
 14. **Logos des équipes (2026-09-29)** : voir "Logos des équipes" dans "Refonte UI" ci-dessous.
 15. **Plafond `rest_days` + documentation (2026-10-14)** : voir "Plafond des jours de repos" ci-dessous.
+16. **Déploiement sur le VPS (2026-10-14)** : en ligne sur https://nba.remicoimbra.fr, voir "Déploiement" ci-dessous.
 
 ## Refonte UI (2026-09-28)
 
-Demande de l'utilisateur : palette NBA bleu/blanc/rouge + mode sombre bleu/noir/rouge, contrastes **WCAG AAA**, calendrier fait maison (pas l'`<input type="date">`), animations fluides, vrais graphiques (pas juste « 60 % »). Choix de l'utilisateur : fiche match sur une **page dédiée** `/match/[id]`, et une page **« Le modèle »**.
+Demande de l'utilisateur : palette NBA bleu/blanc/rouge + mode sombre bleu/noir/rouge, contrastes **WCAG AAA**, calendrier fait maison (pas l'`<input type="date">`), animations fluides, vrais graphiques (pas juste « 60 % »). Choix de l'utilisateur : fiche match sur une **page dédiée** `/match/[id]` (devenue `/match?id=` avec l'export statique, 2026-10-14), et une page **« Le modèle »**.
 
 ### Côté API / données
 - `team_state.py` : chaque match de `recent_games` a en plus `opponent_id` et `elo_before` ; nouveau `elo_history` (`{date, elo}` après chacun des 30 derniers matchs, Elo après match recalculé avec `features_lib.elo_update`). Affichage uniquement, pas des features. L'API reste compatible avec un ancien `team_state.json` (champs manquants → `null`/`[]`).
@@ -446,7 +450,7 @@ Demande de l'utilisateur : palette NBA bleu/blanc/rouge + mode sombre bleu/noir/
 
 ### Logos des équipes (2026-09-29)
 - **Source** : `cdn.nba.com/logos/nba/{team_id}/global/{L|D}/logo.svg` (ni `nba_api` ni notre API ne fournissent d'images). Variante `L` pour fond clair, `D` pour fond sombre (différente pour 10 équipes sur 30).
-- **Servis par le front, pas pris directement sur le site NBA** : `cdn.nba.com` est bloqué depuis le réseau de l'IUT et depuis le VPS, le navigateur du visiteur ne doit donc pas en dépendre. Les 60 SVG (~740 Ko) sont **versionnés** dans `front/public/logos/` pour qu'un `git clone` suffise au déploiement. `npm run fetch:logos` les retélécharge (depuis le PC, le VPS étant bloqué).
+- **Servis par le front, pas pris directement sur le site NBA** : `cdn.nba.com` est bloqué depuis le réseau de l'IUT et depuis le VPS, le navigateur du visiteur ne doit donc pas en dépendre. Les 60 SVG (~740 Ko) sont **versionnés** dans `front/public/logos/` et partent avec l'export statique du front. `npm run fetch:logos` les retélécharge (depuis le PC, le VPS étant bloqué).
 - `TeamBadge` (`TeamBits.js`) : logo dans la pastille colorée domicile/extérieur, les deux variantes rendues avec `dark:hidden` / `hidden dark:block`. Les ID des 30 franchises se suivent (`1610612737` → `1610612766`) : hors de cette plage (club étranger en présaison) ou si le fichier manque (`onError`), le tricode s'affiche comme avant. `next/image` avec `unoptimized` (SVG, pas d'optimisation ni de `dangerouslyAllowSVG`).
 - `globals.css` : variante Tailwind `dark:` (`@custom-variant`) qui suit `data-theme` ET le thème système quand aucun choix manuel n'est fait. À utiliser seulement pour ce que `light-dark()` ne couvre pas (choix d'image).
 - Contour clair autour des logos foncés en mode sombre (Memphis, Orlando) : essayé puis **écarté**, il rend flou le texte des logos ; sans lui ils restent lisibles.
@@ -460,60 +464,45 @@ Demande de l'utilisateur : palette NBA bleu/blanc/rouge + mode sombre bleu/noir/
 - Observation, NON traitée : `train_model.prepare()` supprime 265 lignes (premiers matchs de chaque équipe/saison, `win_pct` ou `win_pct_context` manquants), donc le modèle n'a presque jamais vu `win_pct` = NaN, ce qui est le cas des 1ers matchs de la saison en live. Test : entraîner AVEC ces lignes n'aide pas (265 lignes seulement) ; sur les 39 matchs concernés de 2025-26, le modèle fait 58 % contre 62 % pour l'Elo seul (échantillon trop petit pour conclure). Piste si les premiers matchs de 2026-27 paraissent trop tranchés : rapprocher la proba de `elo_home_probability` tant que `win_pct` est manquant.
 - `schedule.json` régénéré le 2026-10-14 (J-3 → J+14) : la saison régulière 2026-27 commence le **2026-10-22** (2 matchs), 12 matchs le 2026-10-23. Vrais matchs de saison régulière prédits et affichés dans le navigateur (accueil clair/sombre, fiche match, page modèle).
 
-## Déploiement (cible : VPS personnel)
+## Déploiement (VPS personnel, en ligne depuis le 2026-10-14)
 
-L'utilisateur dispose d'un **VPS personnel** et y hébergera le projet complet (front + API + pipeline data). Pas de Vercel ni de PaaS : tout tourne sur la même machine. Rien n'est encore déployé.
+**En ligne : https://nba.remicoimbra.fr.** Guide d'exploitation (redéployer, retour arrière, surveiller, installation initiale) : `docs/deploiement.md`. Le dépôt GitHub est **public** : ne rien y écrire sur les autres services/projets hébergés sur le VPS.
 
-### Caractéristiques du VPS (fournies par l'utilisateur, 2026-09-28)
+| Élément        | Valeur                                                                                                   |
+| -------------- | -------------------------------------------------------------------------------------------------------- |
+| Machine        | OVH VPS Starter, Ubuntu 26.04, 2 vCPU, 3,7 Gio de RAM + 2 Gio de swap, 40 Go — partagée avec d'autres projets |
+| Accès SSH      | `ubuntu@remicoimbra.fr`, clé SSH du PC autorisée (`ssh -o BatchMode=yes` OK)                             |
+| Python         | 3.14 du système (même version que le venv local) + `python3.14-venv` (installé le 2026-10-14)            |
+| Reverse proxy  | Caddy (systemd), un seul `/etc/caddy/Caddyfile` partagé avec les autres sites                            |
+| DNS / HTTPS    | `nba.remicoimbra.fr` → IP du VPS (déjà en place) ; certificat Let's Encrypt obtenu par Caddy             |
 
-| Élément        | Valeur                                                                                                           |
-| -------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Offre          | OVH VPS Starter                                                                                                  |
-| OS             | Ubuntu (utilisateur `ubuntu`, hôte `vps-468382b1`)                                                               |
-| RAM            | 3,7 Gio au total, environ 0,9 Gio utilisés et 2,8 Gio disponibles (déjà d'autres services dessus)                |
-| Stockage       | 40 Go                                                                                                            |
-| Docker         | Installé                                                                                                         |
-| Serveurs web   | **Caddy actif sur 80/443** (vérifié avec `ss -tlnp`) ; Apache installé mais n'écoute pas sur ces ports           |
-| Python système | `python3` uniquement (pas de `python`), `nba_api` non installé                                                   |
-| Accès SSH      | `ubuntu@remicoimbra.fr`, clé SSH du PC déjà autorisée (vérifié le 2026-09-28 avec `ssh -o BatchMode=yes`)        |
-| Nom de domaine | `remicoimbra.fr` pointe sur le VPS ; domaine/sous-domaine du projet pas encore choisi (ex. `nba.remicoimbra.fr`) |
-| CPU            | Pas encore connu                                                                                                 |
-
-Conséquences :
-
-- **Reverse proxy = Caddy** (actif sur 80/443). Le projet doit **s'ajouter** au `Caddyfile` existant (nouveau bloc de site, HTTPS automatique), sans lancer de deuxième reverse proxy ni toucher aux sites déjà servis. Apache est présent mais inactif sur 80/443 : ne pas s'en servir. Les conteneurs du projet n'exposent leurs ports que sur `127.0.0.1` (ex. `127.0.0.1:8000:8000`), jamais publiquement.
-- **RAM (≈ 2,8 Gio libres, partagés avec l'existant)** : suffisant pour faire tourner le front (`next start`, ~150-250 Mo), l'API (pandas + xgboost chargés, ~300-400 Mo) et plus tard un Postgres léger. En revanche `next build` et le pipeline ML complet (`feature_engineering.py` sur 8 000+ matchs) sont des pics plus lourds : les lancer plutôt en local ou dans une image Docker construite ailleurs, ou au minimum vérifier qu'un swap existe (`swapon --show`).
-- **Stockage (40 Go)** : largement suffisant pour les données (quelques dizaines de Mo) ; surveiller surtout les images Docker accumulées (`docker system prune` de temps en temps).
-- **OVH = IP de datacenter** : `stats.nba.com` ET `cdn.nba.com` bloquent le VPS (voir plus bas). La synchro des données se fait donc depuis le PC de l'utilisateur.
-
-### Architecture visée
+### Architecture déployée
 
 ```
-PC de l'utilisateur (IP résidentielle, tâche planifiée Windows quotidienne)
-  infra/sync_to_vps.ps1 : fetch_games --refresh → clean_data → team_state → fetch_schedule
-        │  scp + mv atomique (SSH par clé)
-        ▼
-VPS : data/processed/team_state.json + schedule.json
-        ▲ relus automatiquement par l'API quand leur date de modification change
-Internet ──HTTPS──> Caddy (déjà présent et actif sur le VPS)
-                      ├── /      → front Next.js (next start, port 3000)
-                      └── /api   → API FastAPI (uvicorn, port 8000, NBA_LIVE_SCHEDULE_FALLBACK=0)
-                                     ├── lit data/processed/team_state.json + schedule.json
-                                     └── lit data/models/saved_models/
-(plus tard) PostgreSQL sur le VPS lui-même
+PC de l'utilisateur
+  infra/sync_to_vps.ps1   : données du jour -> ~/nba-predictor/data/processed/ (scp, chmod 644, mv atomique)
+  infra/deploy_to_vps.ps1 : build du front + code API + modèle -> infra/vps/deploy_remote.sh sur le VPS
+Internet ──HTTPS──> Caddy (bloc nba.remicoimbra.fr)
+                      ├── /api/* (préfixe retiré) -> service systemd nba-predictor-api (uvicorn, 127.0.0.4:8000)
+                      └── le reste -> /var/www/nba-predictor/current -> releases/<horodatage> (export statique Next)
 ```
 
-L'API sur le VPS ne fait **aucun** appel réseau vers la NBA.
+Choix faits le 2026-10-14 (plan validé par l'utilisateur ; consigne : ne pas casser les autres projets, priorité à la sécurité) :
 
-Un seul domaine avec l'API sous `/api` évite de gérer le CORS entre deux origines. Des sous-domaines séparés (`api.xxx`) marchent aussi, mais dans ce cas les origines CORS doivent être configurées.
+- **Front = export statique** (`output: "export"` dans `next.config.mjs`), construit sur le PC : aucun processus Node ni `npm install` sur le VPS, donc aucune faille côté serveur de Next exploitable, et 0 Mo de RAM. Conséquence : `/match/[id]` est devenu **`/match?id=…&date=…`** (l'export refuse une route dynamique sans liste d'ID connue au build). `NEXT_PUBLIC_API_URL=/api` au build : même origine, pas de CORS en production. `next start` ne fonctionne plus (inutile) ; `next dev` marche comme avant.
+- **API = service systemd isolé, pas Docker** (les fichiers Docker vides ont été supprimés), sur le modèle des services existants du VPS : `DynamicUser`, `ProtectSystem=strict`, `ProtectHome=tmpfs` + `BindReadOnlyPaths=/home/ubuntu/nba-predictor`, aucune capacité, `MemoryDenyWriteExecute=yes` (fonctionne avec XGBoost), `MemoryMax=800M`, `CPUQuota=100%`. Réseau : `IPAddressDeny=any` + `IPAddressAllow=127.0.0.5` ; Caddy se connecte depuis 127.0.0.5 (`local_address`) ; l'API ne peut joindre personne (ni Internet, ni DNS, ni les autres services locaux). Score `systemd-analyze security` : 1,4 « OK ». Mémoire réelle : ~140 Mo avec le modèle chargé.
+- Variables en production (dans l'unité) : `NBA_LIVE_SCHEDULE_FALLBACK=0`, `NBA_CORS_ORIGINS=` (vide : pas de middleware CORS), `NBA_API_DOCS=0` (pas de `/docs` ni `/openapi.json`), `TZ=Europe/Paris`. En local, les valeurs par défaut de `config.py` gardent le comportement de dev (CORS `localhost:3000`, docs actives).
+- **Déploiement poussé depuis le PC**, pas de clone git sur le VPS : `deploy_to_vps.ps1` envoie les fichiers **suivis par git** (`git ls-files`) de `api/app`, `api/requirements.txt` et `features_lib.py`, dans leur état local. `~/nba-predictor/VERSION` donne le commit déployé (avec « modifications non commitées » le cas échéant). `pip install --only-binary=:all:` seulement si `requirements.txt` a changé. Les 3 dernières versions du front sont gardées ; l'ancien code de l'API reste dans `api/app.prev`.
+- Caddy : HSTS (sans `includeSubDomains`), CSP (`'unsafe-inline'` requis par les scripts inline de l'export Next et le script de thème), `nosniff`, `X-Frame-Options`, COOP, `Permissions-Policy`, corps ≤ 16 Ko, `/_next/static/*` en cache immuable. **Modifier le Caddyfile** : toujours sur une copie, `sudo -u caddy caddy validate --config <copie>`, sauvegarde `Caddyfile.bak-AAAA-MM-JJ-HHMMSS`, puis `sudo systemctl reload caddy`. Contrôler les codes HTTP des autres sites avant et après.
 
-### Conséquences pour le code
+Pièges rencontrés :
 
-- **Config en dur à sortir** (bloquant) : `http://127.0.0.1:8000` dans `front/src/services/api.js` → `NEXT_PUBLIC_API_URL` ; origines CORS dans `api/app/main.py` → variable d'environnement via `api/app/core/config.py`. ⚠️ `NEXT_PUBLIC_*` est injecté **au build** Next.js, pas au démarrage : il faut rebuilder le front si l'URL change.
-- **Docker Compose** devient la voie naturelle (`infra/` est déjà prévu) : ça règle aussi la version de Python (le venv local est en 3.14, la distribution du VPS risque d'avoir une version plus ancienne). L'image API doit embarquer ou monter `data/preprocessing/features_lib.py`, `data/processed/` et `data/models/saved_models/` (import via `sys.path`, voir plus bas).
-- **Artefacts non versionnés** : `.pkl`, `feature_columns.json`, `team_state.json` et les CSV sont dans `.gitignore`. Un `git clone` sur le VPS ne suffit donc pas : il faut soit les copier (`scp`/`rsync`), soit relancer le pipeline sur le VPS.
-- **BDD** : avec un VPS, un PostgreSQL local (conteneur Docker) devient l'option la plus simple, plutôt que Supabase.
-- **Sécurité** : `POST /admin/*` ne doit jamais être exposé publiquement sans protection (token ou accès limité au réseau local du VPS). Désactiver `--reload` d'uvicorn en production.
+- **Git Bash convertit `/api`** en `C:/Program Files/Git/api` dans `NEXT_PUBLIC_API_URL=/api npm run build` (conversion de chemins MSYS). Builder depuis PowerShell, ce que fait `deploy_to_vps.ps1` (qui vérifie aussi que l'URL de dev n'est pas restée dans le bundle), ou préfixer `MSYS_NO_PATHCONV=1`.
+- **Next 16, export statique** : le préchargement demande `modele/__next.modele.__PAGE__.txt` mais l'export écrit `modele/__next.modele/__PAGE__.txt` (404 puis requête de repli). Corrigé par une réécriture Caddy (`@segment` avec `not file` : sans effet si Next corrige le bug).
+- `try_files` de Caddy n'accepte pas de matcher nommé (il le prend pour un nom de fichier) : vérifier l'ordre réel des routes avec `caddy adapt`.
+- Dans Chrome, des `HEAD` en 503 et des requêtes vers `static-lib.com` / Google Analytics viennent d'une extension du navigateur, pas du site (`curl -I` → 200).
+
+Vérifié le 2026-10-14 : déploiement et synchro réels (premier envoi `scp`/`ssh` réussi), pages et API publiques (200 ; `/api/docs` 404 ; POST 405 ; date non synchronisée → 404 immédiat ; http → https), en-têtes de sécurité, filtre IP (refus depuis 127.0.0.1, accès depuis 127.0.0.5), autres sites inchangés avant/après chaque rechargement de Caddy, navigateur (accueil sombre, fiche match en clair, page modèle, console sans erreur, logos). **Reste côté utilisateur** : la tâche planifiée de la synchro (voir plus bas).
 
 ### ❌ `stats.nba.com` est BLOQUÉ depuis le VPS (testé le 2026-09-28)
 
@@ -538,17 +527,13 @@ Validé le 2026-09-28 : `sync_to_vps.ps1 -NoPush` complet sur le PC (2025-26 re-
 
 ⚠️ **Présaison dans le calendrier** : `ScoreboardV3` renvoie aussi les matchs de présaison (ID en `001…`, ex. `0012600009` le 2026-10-03 ; saison régulière = `002…`, playoffs = `004…`). Le modèle n'est entraîné que sur la saison régulière et les rotations de présaison n'ont rien à voir. **Décision de l'utilisateur : les garder, avec un badge.** L'API renvoie un champ `season_type` par match (déduit du préfixe du `game_id` : `preseason`, `regular_season`, `all_star`, `playoffs`, `play_in`, sinon `other`), et `GameCard.js` affiche un badge "Présaison" (avec infobulle "prédiction indicative") quand `season_type === "preseason"`. Les éventuels adversaires hors NBA (clubs étrangers) donnent `prediction: null` (équipe inconnue, déjà géré).
 
-**Reste à faire côté utilisateur pour activer l'envoi** :
-
-1. ~~Clé SSH~~ : déjà en place, `-VpsHost ubuntu@remicoimbra.fr`.
-2. Dossier cible sur le VPS (celui monté comme `data/processed/` dans le conteneur API).
-3. Tâche planifiée Windows (heure à choisir après la fin des matchs de la nuit, ~6 h heure de Paris) :
+**Reste à faire côté utilisateur : la tâche planifiée Windows** (non créée par Claude, à la demande de l'utilisateur). Elle tourne sous le compte de l'utilisateur, seulement quand il est connecté (accès à la clé SSH), et rattrape une exécution manquée :
 
 ```powershell
 $script = "C:\Users\Rémi\Documents\projets_perso\nba-predictor\infra\sync_to_vps.ps1"
-$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$script`" -VpsHost ubuntu@remicoimbra.fr -RemoteDir <dossier>"
+$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script`" -VpsHost ubuntu@remicoimbra.fr -RemoteDir /home/ubuntu/nba-predictor/data/processed"
 $trigger = New-ScheduledTaskTrigger -Daily -At 10:00
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable   # rattrape si le PC était éteint à 10:00
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
 Register-ScheduledTask -TaskName "NBA Predictor - synchro VPS" -Action $action -Trigger $trigger -Settings $settings
 ```
 
@@ -567,20 +552,17 @@ docker run --rm python:3.12-slim sh -c "pip install -q nba_api && python -c \"fr
 
 ## Prochaines étapes (à faire)
 
-0. **Déploiement sur le VPS** (voir "Déploiement" plus haut) : la synchro PC → VPS est codée et testée en local. Restent : Docker Compose + bloc `Caddyfile` (étape 6), config sortie du code (étape 7), puis dossier cible + tâche planifiée pour activer l'envoi (clé SSH déjà OK). **Propositions faites, pas encore validées par l'utilisateur** (reportées à une prochaine session) :
-   - sous-domaine `nba.remicoimbra.fr` (enregistrement DNS CNAME vers `remicoimbra.fr` ou A vers l'IP du VPS), pour ne pas toucher à ce que sert déjà `remicoimbra.fr` ;
-   - projet cloné dans `/home/ubuntu/nba-predictor` sur le VPS → `-RemoteDir /home/ubuntu/nba-predictor/data/processed` pour la synchro ;
-   - lire le `Caddyfile` existant par SSH (lecture seule) avant d'y ajouter le bloc du projet, pour ne pas casser les sites déjà servis.
+0. ~~**Déploiement sur le VPS**~~ : FAIT le 2026-10-14 (voir "Déploiement"). Reste côté utilisateur : la tâche planifiée de la synchro.
 1. ~~`nba_sync_service.py`~~ : **remplacé** par `infra/sync_to_vps.ps1` (la synchro ne peut pas tourner dans l'API sur le VPS, NBA bloquée). `api/app/services/nba_sync_service.py` reste un fichier vide, à supprimer. `POST /admin/sync/games` n'a plus lieu d'être sous cette forme.
 2. **Finir le refactor API** : `routers/predictions.py`, `routers/teams.py`, `routers/players.py` sont toujours des fichiers vides — seul `routers/games.py` a une vraie logique pour l'instant.
 3. **Choix et setup de la BDD** : décider entre PostgreSQL local ou Supabase, créer les tables du schéma (à mettre à jour avec les vraies colonnes : Elo, Net Rating, win_pct_context...). `team_state.json` fait office de solution transitoire correcte pour l'instant.
 4. Tester `/games/today` (et le sélecteur de date du front) avec de VRAIS matchs programmés dès le retour de la saison régulière NBA (mi-octobre 2026) — jusque-là, le paramètre `?date=` ne permet qu'un test partiel (Elo/forme actuels appliqués à une date passée, voir limite documentée dans "Adaptation front" plus haut).
 5. (Optionnel) Poursuivre l'optimisation ML si le temps le permet : tuning XGBoost (GridSearch/early stopping), validation croisée temporelle multi-saisons pour vérifier la robustesse du gain Elo (actuellement mesuré sur une seule saison de test), affiner le calcul du Net Rating (ratio de sommes plutôt que moyenne de ratios, pour réduire le bruit). Amélioration possible aussi sur le score approximatif prédit (actuellement une heuristique simple, pas un vrai modèle de régression).
-6. (Prérequis du déploiement VPS) Dockeriser l'API et le service data (`infra/docker-compose.yml`). Prérequis : l'API importe `data/preprocessing/features_lib.py` via `sys.path` et lit `data/processed/` + `data/models/saved_models/` → l'image API doit embarquer (ou monter) ces dossiers de `data/`.
-7. (Prérequis du déploiement VPS) Sortir la config en dur : ~~URL de l'API dans `front/src/services/api.js`~~ (FAIT : `NEXT_PUBLIC_API_URL`, à fixer AU BUILD) ; reste les origines CORS dans `api/app/main.py` (→ `api/app/core/config.py`). Indispensable avant tout déploiement.
+6. ~~Dockeriser l'API~~ : abandonné, l'API tourne en service systemd isolé (voir "Déploiement").
+7. ~~Sortir la config en dur~~ : FAIT (`NEXT_PUBLIC_API_URL` au build, `NBA_CORS_ORIGINS` et `NBA_API_DOCS` dans `config.py`).
 8. ~~(Optionnel, UX) skeleton de chargement~~ : fait avec la refonte UI.
 10. ~~(Modèle) `rest_days` hors distribution~~ : FAIT le 2026-10-14 (plafond à 7 jours, voir "Plafond des jours de repos"). Reste à surveiller : premiers matchs de 2026-27 avec `win_pct` manquant (voir l'observation dans cette même section).
-9. ~~Écrire `README.md` et `docs/architecture.md`~~ : FAIT le 2026-10-14. À relire/ajuster à la main (le README parle à la première personne du projet, ajouter le lien de démo une fois déployé).
+9. ~~Écrire `README.md` et `docs/architecture.md`~~ : FAIT le 2026-10-14. À relire/ajuster à la main (le README parle à la première personne du projet). Lien de démo ajouté le 2026-10-14.
 
 ## Comment relancer le projet en local
 
@@ -605,7 +587,7 @@ cd front
 npm run dev
 ```
 
-→ `http://localhost:3000` (ex. `/?date=2026-10-05` pour un jour avec matchs, `/modele`)
+→ `http://localhost:3000` (ex. `/?date=2026-10-23` pour un jour avec matchs, `/match?id=0022600008&date=2026-10-23`, `/modele`)
 
 ⚠️ **Port 8000 occupé** sur le PC de l'utilisateur par un serveur Symfony (autre projet, constaté le 2026-09-28). Dans ce cas, lancer l'API sur un autre port et le dire au front :
 
@@ -616,7 +598,7 @@ $env:NEXT_PUBLIC_API_URL = "http://127.0.0.1:8001"; npm run dev   # dans front/
 
 `NEXT_PUBLIC_API_URL` est lu au démarrage de `next dev` et figé AU BUILD pour `next build`. CORS : le front doit rester sur `localhost:3000`.
 
-**Contrôles front :** `npm run lint`, `npm run build`, `npm run check:contrast` (à relancer après toute modification de couleur dans `globals.css`). `npm run fetch:logos` retélécharge les logos des équipes (rarement utile).
+**Contrôles front :** `npm run lint`, `npm run build` (produit l'export statique `front/out/`), `npm run check:contrast` (à relancer après toute modification de couleur dans `globals.css`). `npm run fetch:logos` retélécharge les logos des équipes (rarement utile).
 
 **Pipeline ML (à relancer si les CSV sources changent) :**
 
@@ -634,4 +616,10 @@ python collectors\fetch_schedule.py       # génère schedule.json (calendrier J
 
 ```powershell
 .\infra\sync_to_vps.ps1 -NoPush           # en local ; sans -NoPush : envoi vers le VPS (voir "Déploiement")
+```
+
+**Déployer une nouvelle version (code, front ou modèle réentraîné) :**
+
+```powershell
+.\infra\deploy_to_vps.ps1                # voir docs/deploiement.md
 ```

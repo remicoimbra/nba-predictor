@@ -1,0 +1,6 @@
+# Fichiers exécutés ou lus sur le VPS (Linux) : toujours en LF, même si git
+# convertit en CRLF sous Windows (core.autocrlf=true). Un script bash en CRLF
+# plante (« $'\r': command not found »).
+*.sh      text eol=lf
+*.service text eol=lf
+*.caddy   text eol=lf

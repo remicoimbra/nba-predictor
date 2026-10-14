@@ -64,7 +64,7 @@ export default function GameCard({ game, date, index = 0 }) {
       )}
 
       <Link
-        href={`/match/${game.game_id}?date=${date}`}
+        href={`/match?id=${encodeURIComponent(game.game_id)}&date=${date}`}
         className="mt-4 inline-flex items-center gap-1 self-end text-sm font-semibold text-accent after:absolute after:inset-0 after:rounded-2xl after:content-['']"
       >
         Voir l&apos;analyse

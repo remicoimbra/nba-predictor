@@ -90,7 +90,9 @@ try {
             Invoke-Step "Envoi $name" "scp" ($sshOpts + @((Join-Path $ProcessedDir $name), "${VpsHost}:$RemoteDir/$name.tmp"))
         }
         # Remplacement atomique : l'API ne lit jamais un fichier à moitié copié.
-        $remoteCmd = "mv -f '$RemoteDir/team_state.json.tmp' '$RemoteDir/team_state.json' && mv -f '$RemoteDir/schedule.json.tmp' '$RemoteDir/schedule.json'"
+        # chmod 644 : l'API tourne sous un utilisateur jetable (DynamicUser) qui
+        # doit pouvoir lire les fichiers, quel que soit le mode transmis par scp.
+        $remoteCmd = "chmod 644 '$RemoteDir/team_state.json.tmp' '$RemoteDir/schedule.json.tmp' && mv -f '$RemoteDir/team_state.json.tmp' '$RemoteDir/team_state.json' && mv -f '$RemoteDir/schedule.json.tmp' '$RemoteDir/schedule.json'"
         Invoke-Step "Activation sur le VPS" "ssh" ($sshOpts + @($VpsHost, $remoteCmd))
     }
 

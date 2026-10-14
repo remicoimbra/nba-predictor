@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "motion/react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useId } from "react";
 import ComparisonBars from "@/components/charts/ComparisonBars";
 import EloLine from "@/components/charts/EloLine";
@@ -19,10 +19,12 @@ import { getGame } from "@/services/api";
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export default function MatchView() {
-  const { id } = useParams();
-  const param = useSearchParams().get("date");
+  const params = useSearchParams();
+  const id = params.get("id");
+  const param = params.get("date");
   const date = param && ISO_DATE.test(param) ? param : null;
-  const game = useApi(`${id}|${date}`, () => getGame(id, date));
+  // Sans id (lien tronqué), pas d'appel à l'API : état vide directement.
+  const game = useApi(`${id}|${date}`, () => (id ? getGame(id, date) : Promise.resolve(null)));
 
   const backHref = date ? `/?date=${date}` : "/";
 
@@ -35,7 +37,12 @@ export default function MatchView() {
         Retour aux matchs{date ? ` du ${longDate(date)}` : ""}
       </Link>
 
-      {game.loading && <Loading label="Chargement de l'analyse…" />}
+      {!id && (
+        <EmptyState title="Match introuvable">
+          <p>Aucun match indiqué dans l&apos;adresse.</p>
+        </EmptyState>
+      )}
+      {id && game.loading && <Loading label="Chargement de l'analyse…" />}
       {game.error &&
         (game.error.status === 404 ? (
           <EmptyState title="Match introuvable">

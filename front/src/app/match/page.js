@@ -6,7 +6,8 @@ export const metadata = {
   title: "Analyse du match · NBA Predictor",
 };
 
-// MatchView lit l'id et ?date= côté client (useParams / useSearchParams).
+// MatchView lit ?id= et ?date= côté client (useSearchParams). Pas de route
+// /match/[id] : l'export statique ne connaît pas les ID de match au build.
 export default function MatchPage() {
   return (
     <Suspense fallback={<Loading />}>
