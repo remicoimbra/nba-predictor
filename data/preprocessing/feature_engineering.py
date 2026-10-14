@@ -63,6 +63,7 @@ import pandas as pd
 from features_lib import (
     BOX_SCORE_COLS,
     FORM_WINDOW,
+    REST_DAYS_CAP,
     ROLLING_WINDOWS,
     compute_elo_timeline,
 )
@@ -197,12 +198,13 @@ def add_rolling_features(long_df: pd.DataFrame, with_box_score: bool) -> pd.Data
         .transform(lambda s: s.shift(1).rolling(FORM_WINDOW, min_periods=1).mean())
     )
 
-    # Jours de repos depuis le match précédent (toutes saisons confondues,
-    # l'intersaison compte comme du repos, donc on plafonnera plus tard
-    # si besoin dans train_model.py).
+    # Jours de repos depuis le match précédent (toutes saisons confondues :
+    # l'intersaison compte comme du repos), plafonnés à REST_DAYS_CAP comme
+    # en prédiction live (features_lib.rest_days).
     long_df["rest_days"] = (
         grouped["game_date"]
         .transform(lambda s: s.diff().dt.days)
+        .clip(upper=REST_DAYS_CAP)
     )
 
     return long_df

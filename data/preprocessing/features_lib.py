@@ -29,6 +29,14 @@ import pandas as pd
 ROLLING_WINDOWS = [5, 10]
 FORM_WINDOW = 10  # fenêtre pour le win_pct "forme récente"
 
+# Plafond des jours de repos. Au-delà d'une semaine, une équipe est
+# pleinement reposée : 8-9 jours (pause du All-Star Game) et 130-290 jours
+# (premier match d'une saison, après l'intersaison ou la bulle de 2020) ne
+# diffèrent plus que par du bruit. Sans plafond, ces ~100 matchs d'ouverture
+# donnent des valeurs que le modèle n'a presque jamais vues, et un match de
+# reprise de saison est prédit hors distribution.
+REST_DAYS_CAP = 7
+
 # --- Configuration Elo (partagée batch + live) ---
 ELO_INITIAL = 1500.0
 ELO_K = 20.0              # vitesse d'ajustement du rating après un match
@@ -238,10 +246,18 @@ def win_pct(results: list):
 
 
 def rest_days(last_game_date, as_of_date) -> float | None:
-    """Jours de repos depuis le dernier match. None si aucun match précédent connu."""
+    """
+    Jours de repos depuis le dernier match, plafonnés à REST_DAYS_CAP (même
+    plafond qu'à l'entraînement). None si aucun match précédent connu, ou si
+    la date demandée précède le dernier match connu (date passée interrogée
+    avec l'état actuel des équipes : valeur sans objet).
+    """
     if last_game_date is None:
         return None
-    return float((pd.Timestamp(as_of_date) - pd.Timestamp(last_game_date)).days)
+    days = (pd.Timestamp(as_of_date) - pd.Timestamp(last_game_date)).days
+    if days < 0:
+        return None
+    return float(min(days, REST_DAYS_CAP))
 
 
 def net_rtg_from_boxscore(pts_scored: float, pts_allowed: float, fga: float, oreb: float, tov: float, fta: float):
