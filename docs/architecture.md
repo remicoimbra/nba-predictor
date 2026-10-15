@@ -84,7 +84,7 @@ Next.js (App Router), JavaScript, Tailwind CSS v4 (configuration dans `globals.c
 - **Couleurs** : chaque couleur est déclarée une fois en `light-dark(clair, sombre)`. `npm run check:contrast` vérifie toutes les paires (7:1 pour le texte, 3:1 pour les graphiques) : à relancer après toute modification de couleur. Le rouge NBA n'est jamais utilisé pour du texte (contraste insuffisant).
 - **Graphiques** : SVG et HTML maison, sans bibliothèque. Chacun a un `aria-label`, un tableau de données alternatif (« Voir les données ») et une infobulle au survol.
 - **Animations** : `motion`, avec respect de `prefers-reduced-motion`.
-- **Logos** : les 60 fichiers SVG sont versionnés dans `public/logos/` et servis par le front, car `cdn.nba.com` est bloqué depuis certains réseaux.
+- **Logos** : les 60 fichiers SVG sont versionnés dans `public/team-logos/` et servis par le front, car `cdn.nba.com` est bloqué depuis certains réseaux.
 - **Calendrier** : composant fait maison (bandeau de 14 jours + grille mensuelle, clavier complet : flèches, Début/Fin, Page précédente/suivante, Entrée, Échap).
 
 ## Pourquoi la synchronisation part du PC

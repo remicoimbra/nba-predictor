@@ -5,7 +5,7 @@
 import Image from "next/image";
 import { useState } from "react";
 
-// Logos servis depuis public/logos/ (`npm run fetch:logos`). Les ID NBA des
+// Logos servis depuis public/team-logos/ (`npm run fetch:logos`). Les ID NBA des
 // 30 franchises se suivent ; les autres (clubs étrangers en présaison) n'ont
 // pas de logo et gardent leur tricode.
 const FIRST_TEAM_ID = 1610612737;
@@ -18,32 +18,33 @@ export function TeamBadge({ team, side, size = "md" }) {
   const large = size === "lg";
   const sizes = large ? "h-16 w-16 text-2xl" : "h-12 w-12 text-lg";
   const logoPx = large ? 48 : 36;
-  const hasLogo = team.id >= FIRST_TEAM_ID && team.id <= LAST_TEAM_ID && brokenId !== team.id;
+  const hasLogo =
+    team.id >= FIRST_TEAM_ID && team.id <= LAST_TEAM_ID && brokenId !== team.id;
   return (
     <span
       aria-hidden="true"
       className={`grid shrink-0 place-items-center rounded-2xl font-display font-bold tracking-wide ${sizes} ${
         side === "home" ? "bg-home-wash" : "bg-away-wash"
       }`}
-      style={{ boxShadow: `inset 0 -3px 0 ${side === "home" ? "var(--home)" : "var(--away)"}` }}
+      style={{
+        boxShadow: `inset 0 -3px 0 ${side === "home" ? "var(--home)" : "var(--away)"}`,
+      }}
     >
-      {hasLogo ? (
-        // Variante L sur fond clair, D (couleurs ajustées) sur fond sombre.
-        ["L", "D"].map((variant) => (
-          <Image
-            key={variant}
-            src={`/logos/${team.id}-${variant}.svg`}
-            alt=""
-            width={logoPx}
-            height={logoPx}
-            unoptimized
-            className={variant === "L" ? "dark:hidden" : "hidden dark:block"}
-            onError={() => setBrokenId(team.id)}
-          />
-        ))
-      ) : (
-        team.tricode
-      )}
+      {hasLogo
+        ? // Variante L sur fond clair, D (couleurs ajustées) sur fond sombre.
+          ["L", "D"].map((variant) => (
+            <Image
+              key={variant}
+              src={`/team-logos/${team.id}-${variant}.svg`}
+              alt=""
+              width={logoPx}
+              height={logoPx}
+              unoptimized
+              className={variant === "L" ? "dark:hidden" : "hidden dark:block"}
+              onError={() => setBrokenId(team.id)}
+            />
+          ))
+        : team.tricode}
     </span>
   );
 }
@@ -80,8 +81,20 @@ export function PreseasonBadge() {
       title="Modèle entraîné sur la saison régulière : prédiction indicative"
     >
       <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true">
-        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
-        <path d="M12 8v5M12 16v.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+        <circle
+          cx="12"
+          cy="12"
+          r="9"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <path
+          d="M12 8v5M12 16v.5"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+        />
       </svg>
       Présaison · indicatif
     </span>

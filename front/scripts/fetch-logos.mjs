@@ -17,7 +17,12 @@ const FIRST_TEAM_ID = 1610612737;
 const LAST_TEAM_ID = 1610612766;
 const VARIANTS = ["L", "D"];
 
-const outDir = join(dirname(fileURLToPath(import.meta.url)), "..", "public", "logos");
+const outDir = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "public",
+  "team-logos",
+);
 await mkdir(outDir, { recursive: true });
 
 let failures = 0;
@@ -27,7 +32,8 @@ for (let id = FIRST_TEAM_ID; id <= LAST_TEAM_ID; id++) {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
       const type = res.headers.get("content-type") ?? "";
-      if (!res.ok || !type.includes("svg")) throw new Error(`HTTP ${res.status} (${type})`);
+      if (!res.ok || !type.includes("svg"))
+        throw new Error(`HTTP ${res.status} (${type})`);
       await writeFile(join(outDir, `${id}-${variant}.svg`), await res.text());
     } catch (err) {
       failures++;

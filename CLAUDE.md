@@ -89,9 +89,9 @@ nba-predictor/
 │   │   ├── lib/                    # format.js (dates/nombres fr-FR), useApi.js (fetch + états), charts.js (échelles, useWidth, transitions)
 │   │   └── services/
 │   │       └── api.js              # getGames, getGame, getCalendar, getModelMetrics ; base = NEXT_PUBLIC_API_URL (défaut http://127.0.0.1:8000)
-│   ├── public/logos/               # logos des 30 équipes, {team_id}-L.svg (fond clair) / -D.svg (fond sombre), VERSIONNÉS
+│   ├── public/team-logos/               # logos des 30 équipes, {team_id}-L.svg (fond clair) / -D.svg (fond sombre), VERSIONNÉS
 │   ├── scripts/check-contrast.mjs  # `npm run check:contrast` : toutes les paires de couleurs >= 7:1 (texte) / 3:1 (graphiques)
-│   ├── scripts/fetch-logos.mjs     # `npm run fetch:logos` : (re)télécharge public/logos/ depuis cdn.nba.com
+│   ├── scripts/fetch-logos.mjs     # `npm run fetch:logos` : (re)télécharge public/team-logos/ depuis cdn.nba.com
 │   ├── package.json
 │   └── postcss.config.mjs          # Tailwind v4 : config "CSS-first" (@import "tailwindcss" dans globals.css), PAS de tailwind.config.js
 │
@@ -450,7 +450,7 @@ Demande de l'utilisateur : palette NBA bleu/blanc/rouge + mode sombre bleu/noir/
 
 ### Logos des équipes (2026-09-29)
 - **Source** : `cdn.nba.com/logos/nba/{team_id}/global/{L|D}/logo.svg` (ni `nba_api` ni notre API ne fournissent d'images). Variante `L` pour fond clair, `D` pour fond sombre (différente pour 10 équipes sur 30).
-- **Servis par le front, pas pris directement sur le site NBA** : `cdn.nba.com` est bloqué depuis le réseau de l'IUT et depuis le VPS, le navigateur du visiteur ne doit donc pas en dépendre. Les 60 SVG (~740 Ko) sont **versionnés** dans `front/public/logos/` et partent avec l'export statique du front. `npm run fetch:logos` les retélécharge (depuis le PC, le VPS étant bloqué).
+- **Servis par le front, pas pris directement sur le site NBA** : `cdn.nba.com` est bloqué depuis le réseau de l'IUT et depuis le VPS, le navigateur du visiteur ne doit donc pas en dépendre. Les 60 SVG (~740 Ko) sont **versionnés** dans `front/public/team-logos/` et partent avec l'export statique du front. `npm run fetch:logos` les retélécharge (depuis le PC, le VPS étant bloqué).
 - `TeamBadge` (`TeamBits.js`) : logo dans la pastille colorée domicile/extérieur, les deux variantes rendues avec `dark:hidden` / `hidden dark:block`. Les ID des 30 franchises se suivent (`1610612737` → `1610612766`) : hors de cette plage (club étranger en présaison) ou si le fichier manque (`onError`), le tricode s'affiche comme avant. `next/image` avec `unoptimized` (SVG, pas d'optimisation ni de `dangerouslyAllowSVG`).
 - `globals.css` : variante Tailwind `dark:` (`@custom-variant`) qui suit `data-theme` ET le thème système quand aucun choix manuel n'est fait. À utiliser seulement pour ce que `light-dark()` ne couvre pas (choix d'image).
 - Contour clair autour des logos foncés en mode sombre (Memphis, Orlando) : essayé puis **écarté**, il rend flou le texte des logos ; sans lui ils restent lisibles.
