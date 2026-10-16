@@ -4,47 +4,41 @@
 
 import Image from "next/image";
 import { useState } from "react";
+import { teamColor } from "@/lib/teamColors";
 
-// Logos servis depuis public/team-logos/ (`npm run fetch:logos`). Les ID NBA des
-// 30 franchises se suivent ; les autres (clubs étrangers en présaison) n'ont
-// pas de logo et gardent leur tricode.
-const FIRST_TEAM_ID = 1610612737;
-const LAST_TEAM_ID = 1610612766;
-
-// Pastille de l'équipe (logo, sinon tricode), teintée selon le camp
-// (domicile bleu / extérieur rouge).
+// Pastille de l'équipe : son logo (public/team-logos/, `npm run fetch:logos`)
+// sur sa couleur (lib/teamColors.js). Sans logo (club étranger en présaison,
+// fichier manquant) : tricode sur fond teinté selon le camp.
 export function TeamBadge({ team, side, size = "md" }) {
   const [brokenId, setBrokenId] = useState(null);
   const large = size === "lg";
   const sizes = large ? "h-16 w-16 text-2xl" : "h-12 w-12 text-lg";
   const logoPx = large ? 48 : 36;
-  const hasLogo =
-    team.id >= FIRST_TEAM_ID && team.id <= LAST_TEAM_ID && brokenId !== team.id;
+  const color = teamColor(team);
+  const hasLogo = color && brokenId !== team.id;
   return (
     <span
       aria-hidden="true"
       className={`grid shrink-0 place-items-center rounded-2xl font-display font-bold tracking-wide ${sizes} ${
-        side === "home" ? "bg-home-wash" : "bg-away-wash"
+        hasLogo ? "" : side === "home" ? "bg-home-wash" : "bg-away-wash"
       }`}
-      style={{
-        boxShadow: `inset 0 -3px 0 ${side === "home" ? "var(--home)" : "var(--away)"}`,
-      }}
+      style={hasLogo ? { backgroundColor: color } : undefined}
     >
-      {hasLogo
-        ? // Variante L sur fond clair, D (couleurs ajustées) sur fond sombre.
-          ["L", "D"].map((variant) => (
-            <Image
-              key={variant}
-              src={`/team-logos/${team.id}-${variant}.svg`}
-              alt=""
-              width={logoPx}
-              height={logoPx}
-              unoptimized
-              className={variant === "L" ? "dark:hidden" : "hidden dark:block"}
-              onError={() => setBrokenId(team.id)}
-            />
-          ))
-        : team.tricode}
+      {hasLogo ? (
+        // Variante D (pour fond sombre) dans les deux thèmes : le fond est la
+        // couleur de l'équipe, foncée pour la plupart, et la variante L
+        // disparaît sur certaines (texte noir des Spurs, Jazz tout violet).
+        <Image
+          src={`/team-logos/${team.id}-D.svg`}
+          alt=""
+          width={logoPx}
+          height={logoPx}
+          unoptimized
+          onError={() => setBrokenId(team.id)}
+        />
+      ) : (
+        team.tricode
+      )}
     </span>
   );
 }
