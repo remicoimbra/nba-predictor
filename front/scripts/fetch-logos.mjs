@@ -1,5 +1,5 @@
 // Télécharge les logos des 30 équipes NBA depuis le CDN officiel vers
-// public/logos/, pour les servir nous-mêmes : cdn.nba.com est bloqué sur
+// public/team-logos/, pour les servir nous-mêmes : cdn.nba.com est bloqué sur
 // certains réseaux (IUT, VPS OVH), le navigateur du visiteur ne doit donc
 // pas dépendre de lui.
 //

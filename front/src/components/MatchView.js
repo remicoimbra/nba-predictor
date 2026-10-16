@@ -24,15 +24,26 @@ export default function MatchView() {
   const param = params.get("date");
   const date = param && ISO_DATE.test(param) ? param : null;
   // Sans id (lien tronqué), pas d'appel à l'API : état vide directement.
-  const game = useApi(`${id}|${date}`, () => (id ? getGame(id, date) : Promise.resolve(null)));
+  const game = useApi(`${id}|${date}`, () =>
+    id ? getGame(id, date) : Promise.resolve(null),
+  );
 
   const backHref = date ? `/?date=${date}` : "/";
 
   return (
     <div className="space-y-6">
-      <Link href={backHref} className="inline-flex items-center gap-1.5 text-sm font-semibold text-accent hover:underline">
+      <Link
+        href={backHref}
+        className="inline-flex items-center gap-1.5 text-sm font-semibold text-accent hover:underline"
+      >
         <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
-          <path d="M19 12H5M11 6l-6 6 6 6" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          <path
+            d="M19 12H5M11 6l-6 6 6 6"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+          />
         </svg>
         Retour aux matchs{date ? ` du ${longDate(date)}` : ""}
       </Link>
@@ -85,7 +96,9 @@ function MatchDetail({ game }) {
   const favorite = favoriteSide === "home" ? home : away;
   // Date passée interrogée avec l'état ACTUEL des équipes (team_state.json
   // n'est pas historisé) : des matchs « récents » peuvent être postérieurs.
-  const pastDate = [home, away].some((t) => t.recent_games?.some((g) => g.date >= game.date));
+  const pastDate = [home, away].some((t) =>
+    t.recent_games?.some((g) => g.date >= game.date),
+  );
 
   return (
     <div className="space-y-6">
@@ -113,17 +126,31 @@ function MatchDetail({ game }) {
 
         <div className="grid items-center gap-6 md:grid-cols-[1fr_auto_1fr]">
           <HeroTeam team={home} side="home" />
-          <div className="order-first md:order-none">
+          <div className="order-first md:order-0">
             {prediction ? (
               <>
-                <WinGauge probability={Math.max(prediction.home_win_probability, prediction.away_win_probability)} team={favorite} side={favoriteSide} />
-                <p className="mt-3 text-center text-sm text-text-2">Score estimé</p>
+                <WinGauge
+                  probability={Math.max(
+                    prediction.home_win_probability,
+                    prediction.away_win_probability,
+                  )}
+                  team={favorite}
+                  side={favoriteSide}
+                />
+                <p className="mt-3 text-center text-sm text-text-2">
+                  Score estimé
+                </p>
                 <p className="text-center font-display text-4xl font-bold">
-                  {int(prediction.predicted_home_score)} <span className="text-text-2">–</span> {int(prediction.predicted_away_score)}
+                  {int(prediction.predicted_home_score)}{" "}
+                  <span className="text-text-2">–</span>{" "}
+                  {int(prediction.predicted_away_score)}
                 </p>
               </>
             ) : (
-              <p className="max-w-56 text-center text-text-2">Prédiction indisponible : une des équipes est inconnue du modèle.</p>
+              <p className="max-w-56 text-center text-text-2">
+                Prédiction indisponible : une des équipes est inconnue du
+                modèle.
+              </p>
             )}
           </div>
           <HeroTeam team={away} side="away" />
@@ -146,13 +173,21 @@ function MatchDetail({ game }) {
       )}
 
       {hasStats && (
-        <Section title="Face-à-face" subtitle="Les statistiques utilisées par le modèle, côte à côte." index={1}>
+        <Section
+          title="Face-à-face"
+          subtitle="Les statistiques utilisées par le modèle, côte à côte."
+          index={1}
+        >
           <ComparisonBars home={home} away={away} />
         </Section>
       )}
 
       {hasStats && (
-        <Section title="Forme récente" subtitle="Écart de points sur les 10 derniers matchs : au-dessus de zéro, une victoire." index={2}>
+        <Section
+          title="Forme récente"
+          subtitle="Écart de points sur les 10 derniers matchs : au-dessus de zéro, une victoire."
+          index={2}
+        >
           <div className="grid gap-8 md:grid-cols-2">
             <FormChart team={home} side="home" />
             <FormChart team={away} side="away" />
@@ -161,7 +196,11 @@ function MatchDetail({ game }) {
       )}
 
       {hasStats && (
-        <Section title="Évolution Elo" subtitle="Rating après chaque match. Plus il est haut, plus l'équipe est forte." index={3}>
+        <Section
+          title="Évolution Elo"
+          subtitle="Rating après chaque match. Plus il est haut, plus l'équipe est forte."
+          index={3}
+        >
           <EloLine home={home} away={away} />
         </Section>
       )}
@@ -169,18 +208,26 @@ function MatchDetail({ game }) {
       <Section title="À savoir" index={4}>
         <ul className="list-disc space-y-2 pl-5 text-sm text-text-2">
           <li>
-            Le modèle prédit uniquement le vainqueur. Le score est une estimation simple, tirée de l&apos;attaque et de la défense
-            récentes des deux équipes.
+            Le modèle prédit uniquement le vainqueur. Le score est une
+            estimation simple, tirée de l&apos;attaque et de la défense récentes
+            des deux équipes.
           </li>
           {game.season_type === "preseason" && (
-            <li>Match de présaison : le modèle a été entraîné sur la saison régulière, et les rotations sont expérimentales.</li>
+            <li>
+              Match de présaison : le modèle a été entraîné sur la saison
+              régulière, et les rotations sont expérimentales.
+            </li>
           )}
           {(home.new_season || away.new_season) && (
-            <li>Nouvelle saison : les bilans repartent de zéro et l&apos;Elo est ramené de 25 % vers la moyenne (1500).</li>
+            <li>
+              Nouvelle saison : les bilans repartent de zéro et l&apos;Elo est
+              ramené de 25 % vers la moyenne (1500).
+            </li>
           )}
           {pastDate && (
             <li>
-              Date passée : les statistiques affichées sont celles d&apos;aujourd&apos;hui, pas celles du jour du match (pas
+              Date passée : les statistiques affichées sont celles
+              d&apos;aujourd&apos;hui, pas celles du jour du match (pas
               d&apos;historique par date).
             </li>
           )}
@@ -193,12 +240,18 @@ function MatchDetail({ game }) {
 function HeroTeam({ team, side }) {
   const end = side === "away";
   return (
-    <div className={`flex flex-col items-center gap-2 text-center ${end ? "md:items-end md:text-right" : "md:items-start md:text-left"}`}>
+    <div
+      className={`flex flex-col items-center gap-2 text-center ${end ? "md:items-end md:text-right" : "md:items-start md:text-left"}`}
+    >
       <TeamBadge team={team} side={side} size="lg" />
-      <p className="font-display text-3xl font-bold uppercase leading-none">{team.name}</p>
+      <p className="font-display text-3xl font-bold uppercase leading-none">
+        {team.name}
+      </p>
       <p className="text-sm text-text-2">
         {side === "home" ? "Domicile" : "Extérieur"}
-        {team.record && team.record.wins + team.record.losses > 0 && ` · ${record(team.record)}`}
+        {team.record &&
+          team.record.wins + team.record.losses > 0 &&
+          ` · ${record(team.record)}`}
         {team.elo != null && ` · Elo ${int(team.elo)}`}
       </p>
       <FormPills results={team.last_results} align={end ? "end" : "start"} />
