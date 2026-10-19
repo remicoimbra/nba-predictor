@@ -8,7 +8,7 @@
 #
 # 1. dépendances Python (seulement si requirements.txt a changé)
 # 2. code de l'API (l'ancien reste dans api/app.prev pour un retour arrière)
-# 3. modèle entraîné
+# 3. modèle entraîné (l'ancien reste dans data/models/saved_models.prev)
 # 4. front : nouvelle version dans releases/, bascule atomique du lien current
 # 5. redémarrage du service + contrôle de santé (échec -> code de sortie 1)
 #
@@ -23,7 +23,7 @@ WEB_ROOT=/var/www/nba-predictor
 SERVICE=nba-predictor-api
 KEEP_RELEASES=3
 RELEASE=$(date +%Y%m%d-%H%M%S)
-MODEL_FILES=(xgboost_v1.pkl feature_columns.json model_metrics.json)
+MODEL_FILES=(logreg.pkl feature_columns.json model_metrics.json)
 
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 
@@ -68,8 +68,12 @@ if [ -f "$APP_ROOT/data/preprocessing/features_lib.py" ]; then
 fi
 install -m 644 "$STAGING/code/data/preprocessing/features_lib.py" "$APP_ROOT/data/preprocessing/features_lib.py"
 
-# 3. Modèle (.tmp puis mv : jamais de fichier à moitié copié)
+# 3. Modèle (.tmp puis mv : jamais de fichier à moitié copié). Copie de
+# l'ancien d'abord : le code de api/app.prev ne sait lire que le modèle de
+# sa version, un retour arrière doit restaurer les deux (docs/deploiement.md).
 log "Modèle"
+rm -rf "$APP_ROOT/data/models/saved_models.prev"
+cp -a "$APP_ROOT/data/models/saved_models" "$APP_ROOT/data/models/saved_models.prev"
 for f in "${MODEL_FILES[@]}"; do
     install -m 644 "$STAGING/models/$f" "$APP_ROOT/data/models/saved_models/$f.tmp"
     mv -f "$APP_ROOT/data/models/saved_models/$f.tmp" "$APP_ROOT/data/models/saved_models/$f"
@@ -98,6 +102,15 @@ check() { curl -fsS -m 3 --interface 127.0.0.5 -o /dev/null "http://127.0.0.4:80
 for _ in $(seq 1 30); do
     if check /; then
         check /model/metrics || { echo "API démarrée mais /model/metrics en échec" >&2; exit 1; }
+        # Première prédiction : charge le modèle et team_state.json (503 si
+        # l'un manque, 500 si le modèle ne lit pas les features). 404 admis :
+        # la date du jour peut manquer au calendrier synchronisé.
+        code=$(curl -sS -m 30 --interface 127.0.0.5 -o /dev/null -w '%{http_code}' \
+            "http://127.0.0.4:8000/games/today" 2>/dev/null || true)
+        case "$code" in
+            200|404) ;;
+            *) echo "API démarrée mais /games/today -> $code : sudo journalctl -u $SERVICE -n 50" >&2; exit 1 ;;
+        esac
         rm -f "$INCOMING/bundle.tar.gz"
         log "API OK ($(cat "$APP_ROOT/VERSION"))"
         exit 0

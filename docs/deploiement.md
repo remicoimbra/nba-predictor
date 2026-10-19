@@ -47,9 +47,9 @@ Après une modification du code, du front ou un réentraînement du modèle :
 Le script construit le front (`NEXT_PUBLIC_API_URL=/api`), envoie le code de l'API (fichiers suivis par git, dans leur état local), `features_lib.py`, le modèle et le front, puis lance [infra/vps/deploy_remote.sh](../infra/vps/deploy_remote.sh) sur le serveur. Celui-ci :
 
 1. met à jour les dépendances Python, seulement si `api/requirements.txt` a changé ;
-2. remplace le code de l'API et le modèle ;
+2. remplace le code de l'API et le modèle (`logreg.pkl`, `feature_columns.json`, `model_metrics.json`), en gardant les précédents pour un retour arrière ;
 3. installe le front dans une nouvelle version et bascule `current` d'un coup ;
-4. redémarre le service et vérifie qu'il répond.
+4. redémarre le service et vérifie qu'il répond, y compris une première prédiction (`/games/today` : 200, ou 404 si le jour manque au calendrier).
 
 Le script contrôle ensuite le site depuis le PC. Journal : `infra/logs/deploy_AAAA-MM-JJ.log`.
 
@@ -73,12 +73,17 @@ ls releases/                                    # versions disponibles
 ln -sfn releases/<version> current.new && mv -Tf current.new current
 ```
 
-API (code précédent) :
+API (code et modèle précédents, toujours ensemble : un code ne sait lire que le modèle de sa version) :
 
 ```bash
-cd ~/nba-predictor/api
-mv app app.bad && mv app.prev app && sudo systemctl restart nba-predictor-api
+cd ~/nba-predictor
+mv api/app api/app.bad && mv api/app.prev api/app
+mv data/models/saved_models data/models/saved_models.bad && mv data/models/saved_models.prev data/models/saved_models
+cp -p data/preprocessing/features_lib.py.prev data/preprocessing/features_lib.py
+sudo systemctl restart nba-predictor-api
 ```
+
+`saved_models.prev` n'existe qu'à partir du déploiement du 2026-10-19 (passage à la régression logistique).
 
 ## Surveiller
 
