@@ -8,7 +8,7 @@ Ce document explique comment le projet est construit et pourquoi. Pour lancer l'
 PC de développement (IP résidentielle)
   nba_api ──> data/collectors ──> data/preprocessing ──> data/models
                                         │                    │
-                          team_state.json, schedule.json    xgboost_v1.pkl, feature_columns.json,
+                          team_state.json, schedule.json    logreg.pkl, feature_columns.json,
                                         │                    model_metrics.json
                                         ▼                    ▼
                                  api/ (FastAPI) ── lit les fichiers, prédit à la demande
@@ -44,6 +44,8 @@ Pour chaque équipe, calculées **avant** le match :
 - **Jours de repos**, plafonnés à 7.
 - **Différences** domicile − extérieur de chacune, généralement plus discriminantes qu'une paire de colonnes séparées.
 
+Le modèle n'utilise que les différences et l'Elo de chaque équipe (11 variables, voir « Choisir le modèle »). Les autres colonnes restent calculées : la fiche match les affiche.
+
 ### Éviter la fuite temporelle
 
 Une feature qui utilise une information connue seulement après le match donne un modèle excellent en test et inutile en production. Quatre protections :
@@ -51,7 +53,7 @@ Une feature qui utilise une information connue seulement après le match donne u
 1. Chaque statistique glissante est décalée d'un match (`shift(1)`), et l'Elo enregistré est celui d'**avant** le match.
 2. Chaque saison testée est prédite par un modèle entraîné uniquement sur les saisons qui la précèdent : pas de découpage aléatoire (voir « Évaluer honnêtement »).
 3. `game_features.csv` contient aussi le boxscore brut du match joué (`home_fga`, `away_oreb`…), connu seulement après coup. `train_model.py` choisit ses colonnes par **liste blanche de motifs** (`FEATURE_PATTERNS`) et jamais par liste noire : une nouvelle colonne ne devient pas une feature par accident.
-4. `check_features.py` le vérifie automatiquement : il inverse le résultat de quelques matchs et recalcule toutes les features. Celles du match et des matchs antérieurs ne doivent pas bouger, celles des matchs suivants si. Le même script contrôle que l'API calcule exactement les mêmes features que l'entraînement (50 matchs, `team_state.json` reconstruit avec les seuls matchs antérieurs, écart toléré 1e-9).
+4. `check_features.py` le vérifie automatiquement : il inverse le résultat de quelques matchs et recalcule toutes les features. Celles du match et des matchs antérieurs ne doivent pas bouger, celles des matchs suivants si. Le même script contrôle que l'API calcule exactement les mêmes features que l'entraînement (50 matchs, `team_state.json` reconstruit avec les seuls matchs antérieurs, écart toléré 1e-9), et que l'explication renvoyée pour ces matchs redonne bien la probabilité.
 
 ### Évaluer honnêtement
 
@@ -64,16 +66,15 @@ Deux variantes se comparent sur les **mêmes matchs** : on calcule l'écart de l
 | Modèle | Précision | Log loss | Brier |
 | --- | --- | --- | --- |
 | Règle naïve (taux de victoire à domicile) | 55,3 % | 0,688 | 0,247 |
-| XGBoost (servi par l'API) | 64,6 % | 0,633 | 0,221 |
-| Régression logistique | 65,6 % | 0,619 | 0,215 |
+| **Régression logistique (servie par l'API)** | 65,5 % | 0,617 | 0,214 |
+| XGBoost | 65,7 % | 0,621 | 0,216 |
 | Elo seul (sans apprentissage) | 65,9 % | 0,618 | 0,215 |
 
-(Avec l'Elo réglé le 2026-10-19. Avant le réglage : XGBoost 0,635, régression logistique 0,620, Elo seul 0,632.)
+(État du 2026-10-19 après le réglage de l'Elo et le choix du modèle. Au départ, avec 31 variables et l'Elo d'origine : XGBoost 0,635, régression logistique 0,620, Elo seul 0,632.)
 
 Ce que ça a montré :
-- La précision varie de 62 % (2022-23) à 69 % (2025-26) d'une saison à l'autre. Le 69 % mesuré sur la seule saison 2025-26 surestimait ce qu'on peut attendre en moyenne.
-- La régression logistique donne de **meilleures probabilités** que XGBoost : écart de log loss de 0,014 (intervalle à 95 % : 0,009 à 0,019), dans le même sens sur les 5 saisons.
-- **L'Elo seul fait aussi bien que la régression logistique** (écart dans le bruit), et significativement mieux que XGBoost : écart de 0,015 (0,009 à 0,020), y compris sur les deux saisons qui n'ont pas servi à régler l'Elo. Les 30 autres variables n'apportent donc rien de mesurable aux probabilités, et XGBoost les dégrade. Le choix du modèle servi reste ouvert.
+- La précision varie de 63 % (2022-23) à 69 % (2025-26) d'une saison à l'autre. Le 69 % mesuré sur la seule saison 2025-26 surestimait ce qu'on peut attendre en moyenne.
+- Avant le choix du modèle, XGBoost, alors servi, donnait des probabilités nettement moins bonnes que la régression logistique et que l'Elo seul (écart de log loss de 0,014 à 0,015, dans le même sens sur les 5 saisons). D'où les essais de « Choisir le modèle ».
 - Résultat négatif : entraîner aussi sur les matchs où une variable manque n'apporte rien de mesurable. L'entraînement se fait donc sur les matchs complets.
 
 ### Régler l'Elo
@@ -90,6 +91,24 @@ Les paramètres sont écrits dans `model_metrics.json` (`elo_params`) et dans `t
 
 Les modèles servis sont ensuite réentraînés sur **toutes** les saisons, 2025-26 comprise : c'est la situation que simule chaque pli (prédire la saison suivante avec tout le passé connu).
 
+### Choisir le modèle
+
+Cinq essais, un par un, chacun adopté seulement s'il passe la règle de la comparaison appariée. Réglages sur 2021-22 à 2023-24, confirmation sur l'ensemble et sur 2024-25 + 2025-26 :
+
+| Essai | Écart de log loss (intervalle à 95 %) | Décision |
+| --- | --- | --- |
+| Bilan de la saison lissé en début de saison : (V + 4) / (N + 8) au lieu d'une valeur manquante | XGBoost −0,0011 (−0,0039 à +0,0019), mais +0,0028 sur les 2 saisons de confirmation ; régression logistique −0,0002 | Écarté |
+| Garder seulement les écarts domicile − extérieur et l'Elo des deux équipes (11 variables au lieu de 31) | Régression logistique −0,0016 (−0,0026 à −0,0006), même sens sur les 5 saisons ; XGBoost dans le bruit | Adopté |
+| XGBoost avec arrêt précoce (profondeur 2, environ 150 arbres au lieu de 300) | −0,0113 (−0,0152 à −0,0076), 5 saisons sur 5 | Adopté pour XGBoost |
+| Modèle de marge : régression Ridge sur l'écart de points, P = Φ(μ/σ) | +0,0000 (−0,0011 à +0,0011) face à la régression logistique | Écarté (égalité, plus complexe), à reprendre pour le score |
+| Moyennes de plusieurs modèles, en log-odds | Toutes dans le bruit face à la régression logistique seule | Écartées |
+
+Une recalibration (Platt) n'était prévue que si l'erreur de calibration dépassait 2 points : elle est de 1,5 point.
+
+**Modèle servi : la régression logistique**, qui a la meilleure log loss. Face à XGBoost amélioré : −0,0040 (−0,0064 à −0,0015), 5 saisons sur 5 ; face à l'Elo seul : −0,0010 (−0,0030 à +0,0011), dans le bruit. Face à l'ancien modèle servi (XGBoost à 31 variables) : −0,0156 (−0,0202 à −0,0106) et +0,9 point de précision. Sur les 107 premiers matchs de saison régulière 2026-27, ses probabilités suivent celles de l'Elo seul (corrélation 0,98, 56 % en moyenne pour l'équipe qui reçoit) ; l'ancien XGBoost sous-estimait le domicile (53,5 %).
+
+L'explication d'une prédiction reste exacte. Pour un modèle linéaire, la contribution d'une variable est son coefficient multiplié par sa valeur standardisée (0 = valeur moyenne de l'entraînement), en log-odds ; le biais plus la somme des contributions redonne la probabilité. Le bilan des 10 derniers matchs et le Net Rating récent forment une seule famille, « Forme récente » : corrélés à 0,88, ils se partagent le même effet de façon instable (le coefficient du bilan récent passe de +0,04 à −0,13 selon les saisons d'entraînement). Séparés, ils donneraient des facteurs de signes opposés difficiles à lire.
+
 ### `features_lib.py` : une seule définition des formules
 
 L'entraînement calcule les features sur tout l'historique (vectorisé, pandas). L'API les calcule pour un seul match futur à partir de `team_state.json`. Si les deux codes divergeaient, le modèle tournerait sans erreur mais avec de moins bonnes prédictions, sans qu'on le voie. `features_lib.py` contient donc les constantes (fenêtres, paramètres Elo `DEFAULT_ELO_PARAMS`, plafond de repos) et les fonctions pures utilisées des deux côtés. La non-régression a été vérifiée : l'ancienne et la nouvelle implémentation de l'Elo donnent un écart de 0,0 sur les 8 279 matchs.
@@ -97,14 +116,14 @@ L'entraînement calcule les features sur tout l'historique (vectorisé, pandas).
 ### Cas particuliers gérés à la prédiction
 
 - **Changement de saison** : la saison d'un match est déduite de sa date (frontière en août). Si elle est postérieure à celle de `team_state.json`, on reproduit ce que fait l'entraînement : Elo régressé vers la moyenne (50 %) et bilans de la saison remis à zéro (manquants). Les moyennes glissantes ne sont pas remises à zéro, comme à l'entraînement.
-- **Valeurs manquantes** : laissées en `NaN`, XGBoost les gère nativement, plutôt qu'une valeur arbitraire qui biaiserait la prédiction.
+- **Valeurs manquantes** (bilan de la saison avant le premier match) : remplacées par la médiane de l'entraînement, par le modèle lui-même (`SimpleImputer` en tête du pipeline), comme pendant l'évaluation. Leur contribution à l'explication est alors presque nulle.
 - **Jours de repos** : plafonnés à 7 à l'entraînement et en prédiction (`REST_DAYS_CAP`). Sans plafond, les ~100 matchs d'ouverture de saison de l'historique (130 à 288 jours après le dernier match, à cause de l'intersaison et de la « bulle » de 2020) donnent des valeurs que le modèle voit trop peu. Mesuré sur 5 graines : le plafond ne change pas la qualité de façon mesurable (69,1 % sans plafond contre 68,6 % avec, pour un écart-type de 0,4 point entre graines). Une date antérieure au dernier match connu donne un repos manquant plutôt qu'un nombre négatif.
 
 ## API (`api/`)
 
 FastAPI, un routeur par domaine. La logique est dans `services/`, les routes dans `routers/`.
 
-- `services/predictor_service.py` : charge une seule fois le modèle, `feature_columns.json` et `team_state.json`, construit les features d'un match et prédit. Relit `team_state.json` quand sa date de modification change, sans redémarrage. Calcule aussi l'explication : les contributions XGBoost de type SHAP (`pred_contribs`) en log-odds, sommées par famille de statistiques. La sigmoïde de (biais + somme des contributions) redonne exactement la probabilité affichée. Avertit dans le journal si les paramètres Elo de `team_state.json`, de `model_metrics.json` et du code diffèrent.
+- `services/predictor_service.py` : charge une seule fois le modèle, `feature_columns.json` et `team_state.json`, construit les features d'un match et prédit. Relit `team_state.json` quand sa date de modification change, sans redémarrage. Calcule aussi l'explication : les contributions de la régression logistique (`features_lib.linear_contributions`, coefficient × valeur standardisée) en log-odds, sommées par famille de statistiques (`FACTOR_FAMILIES`, aussi utilisées pour les poids de la page « Le modèle »). La sigmoïde de (biais + somme des contributions) redonne exactement la probabilité affichée. Avertit dans le journal si les paramètres Elo de `team_state.json`, de `model_metrics.json` et du code diffèrent.
 - `services/schedule_service.py` : lit `schedule.json`. Un appel direct à la NBA n'a lieu que si `NBA_LIVE_SCHEDULE_FALLBACK` est actif (développement local).
 - `routers/games.py` : `/games/today`, `/games/calendar`, `/games/{game_id}`. Erreurs distinguées : 400 date mal formée, 404 date non synchronisée, 502 calendrier NBA indisponible, 503 modèle non prêt. Un match avec une équipe inconnue renvoie `prediction: null` sans faire échouer le reste de la liste.
 - `routers/model.py` : `/model/metrics`.
@@ -162,4 +181,6 @@ Si les fichiers deviennent insuffisants : PostgreSQL local (conteneur Docker). T
 | Validation walk-forward plutôt qu'une saison de test | Mesure la variation d'une saison à l'autre et permet des comparaisons appariées assez sensibles pour décider |
 | Entraînement sur les matchs complets | Garder les matchs incomplets n'aidait pas (écart dans le bruit) et dégradait la régression logistique sur ces matchs |
 | Paramètres Elo réglés sur l'Elo seul | Objectif propre à l'Elo (pas au modèle complet), réglage sur 2020-21 à 2023-24, confirmation sur 2 saisons jamais vues : avantage du terrain 100 → 40, régression 25 % → 50 % |
-| Pistes (plan du 2026-10-19) | Bilan lissé en début de saison, choix du modèle servi (l'Elo seul et la régression logistique battent XGBoost en probabilités), fatigue et déplacements, vrai modèle de régression pour le score, joueurs absents |
+| Régression logistique servie plutôt que XGBoost | Meilleure log loss en walk-forward (écart significatif, même sens sur les 5 saisons) et explication exacte de chaque prédiction |
+| 11 variables seulement (écarts + Elo) | Les 20 autres colonnes n'aidaient aucun modèle et gênaient la régression logistique ; elles restent affichées sur la fiche match |
+| Pistes (plan du 2026-10-19) | Fatigue et déplacements, vrai modèle de régression pour le score, joueurs absents |

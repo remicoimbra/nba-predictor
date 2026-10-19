@@ -11,8 +11,8 @@ Projet personnel réalisé en BUT MMI (parcours Dev) pour travailler un projet c
 ## Ce que fait l'application
 
 - **Matchs du jour** : un bandeau de 14 jours et un calendrier mensuel au clavier, avec pour chaque match la probabilité de victoire, le score estimé et la forme récente des deux équipes.
-- **Fiche match** : pourquoi le modèle prédit ce résultat (contributions de type SHAP regroupées par famille de statistiques), comparaison côte à côte des deux équipes, courbes de forme et d'évolution de l'Elo.
-- **Page « Le modèle »** : précision, log loss, score de Brier, résultats saison par saison, courbe de calibration et importance des variables, lus directement dans les résultats du dernier entraînement.
+- **Fiche match** : pourquoi le modèle prédit ce résultat (contributions exactes de chaque statistique, regroupées par famille), comparaison côte à côte des deux équipes, courbes de forme et d'évolution de l'Elo.
+- **Page « Le modèle »** : précision, log loss, score de Brier, résultats saison par saison, courbe de calibration et poids de chaque famille de statistiques, lus directement dans les résultats du dernier entraînement.
 - **Accessibilité** : couleurs vérifiées au contraste WCAG AAA (`npm run check:contrast`), thème clair et sombre, navigation au clavier, tableau de données alternatif pour chaque graphique, animations réduites si le système le demande.
 
 | Fiche match (sombre) | Page « Le modèle » |
@@ -26,11 +26,11 @@ Validation **walk-forward** : chaque saison de 2021-22 à 2025-26 est prédite p
 | Modèle | Précision | Log loss | Brier |
 | --- | --- | --- | --- |
 | Règle naïve « le domicile gagne » | 55,3 % | 0,688 | 0,247 |
-| XGBoost (utilisé par l'API) | 64,6 % | 0,633 | 0,221 |
-| Régression logistique | 65,6 % | 0,619 | 0,215 |
+| **Régression logistique (utilisée par l'API)** | 65,5 % | 0,617 | 0,214 |
+| XGBoost | 65,7 % | 0,621 | 0,216 |
 | Elo seul (sans apprentissage) | 65,9 % | 0,618 | 0,215 |
 
-La précision varie de 62 % à 69 % selon la saison. Sur la seule saison 2025-26, la plus facile de la période, les trois modèles atteignent 69 %. La régression logistique donne des probabilités nettement mieux calibrées que XGBoost : l'écart de log loss est significatif, dans le même sens sur les 5 saisons. Les paramètres de l'Elo (avantage du terrain, régression entre saisons) ont été réglés sur des saisons passées puis confirmés sur deux saisons jamais vues ; l'Elo seul fait alors aussi bien que la régression logistique. La variable de loin la plus utile est la **différence de rating Elo** entre les deux équipes ; c'est elle qui a fait passer la précision de 66,8 % à près de 69 % (sur 2025-26) pendant le développement.
+La précision varie de 63 % à 69 % selon la saison. Sur la seule saison 2025-26, la plus facile de la période, les trois modèles atteignent 69 %. La régression logistique, qui ne garde que 11 variables (écarts entre les deux équipes et Elo de chacune), donne les meilleures probabilités : sa log loss est significativement plus basse que celle de XGBoost, dans le même sens sur les 5 saisons. C'est donc elle qui est en ligne, et chacune de ses prédictions se décompose exactement en contributions des statistiques. Les paramètres de l'Elo (avantage du terrain, régression entre saisons) ont été réglés sur des saisons passées puis confirmés sur deux saisons jamais vues ; l'Elo seul fait alors jeu égal avec la régression logistique, ce qui veut dire que les autres statistiques n'apportent presque rien de plus. La variable de loin la plus utile est la **différence de rating Elo** entre les deux équipes ; c'est elle qui a fait passer la précision de 66,8 % à près de 69 % (sur 2025-26) pendant le développement.
 
 **Limites assumées** : le modèle ignore les blessures, les transferts et les joueurs absents. Le score affiché est une heuristique (forme offensive et défensive récente), pas un modèle de régression : le modèle ne sait que classer victoire ou défaite. En tout début de saison, `win_pct` n'a pas encore de valeur, et les premières prédictions reposent surtout sur l'Elo et la forme de fin de saison précédente.
 
