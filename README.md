@@ -12,7 +12,7 @@ Projet personnel réalisé en BUT MMI (parcours Dev) pour travailler un projet c
 
 - **Matchs du jour** : un bandeau de 14 jours et un calendrier mensuel au clavier, avec pour chaque match la probabilité de victoire, le score estimé et la forme récente des deux équipes.
 - **Fiche match** : pourquoi le modèle prédit ce résultat (contributions de type SHAP regroupées par famille de statistiques), comparaison côte à côte des deux équipes, courbes de forme et d'évolution de l'Elo.
-- **Page « Le modèle »** : précision, log loss, courbe de calibration et importance des variables, lues directement dans les résultats du dernier entraînement.
+- **Page « Le modèle »** : précision, log loss, score de Brier, résultats saison par saison, courbe de calibration et importance des variables, lus directement dans les résultats du dernier entraînement.
 - **Accessibilité** : couleurs vérifiées au contraste WCAG AAA (`npm run check:contrast`), thème clair et sombre, navigation au clavier, tableau de données alternatif pour chaque graphique, animations réduites si le système le demande.
 
 | Fiche match (sombre) | Page « Le modèle » |
@@ -21,15 +21,15 @@ Projet personnel réalisé en BUT MMI (parcours Dev) pour travailler un projet c
 
 ## Résultats du modèle
 
-Entraînement sur 6 saisons (2019-20 à 2024-25), **test sur la saison 2025-26 que le modèle n'a jamais vue** (1 186 matchs). Le découpage est strictement chronologique : aucune information du futur n'entre dans une feature.
+Validation **walk-forward** : chaque saison de 2021-22 à 2025-26 est prédite par un modèle entraîné uniquement sur les saisons précédentes, qu'il n'a donc jamais vue (6 140 matchs au total). Aucune information du futur n'entre dans une feature, ce que vérifie un contrôle automatique.
 
-| Modèle | Précision | Log loss |
-| --- | --- | --- |
-| Règle naïve « le domicile gagne » | 55,1 % | n/a |
-| Régression logistique | 69,0 % | 0,595 |
-| XGBoost (utilisé par l'API) | 68,9 % | 0,602 |
+| Modèle | Précision | Log loss | Brier |
+| --- | --- | --- | --- |
+| Règle naïve « le domicile gagne » | 55,3 % | 0,688 | 0,247 |
+| XGBoost (utilisé par l'API) | 64,6 % | 0,635 | 0,222 |
+| Régression logistique | 65,5 % | 0,620 | 0,215 |
 
-Les deux modèles font jeu égal : l'écart entre eux est inférieur au bruit statistique d'un échantillon de 1 186 matchs. La variable de loin la plus utile est la **différence de rating Elo** entre les deux équipes ; c'est elle qui a fait passer la précision de 66,8 % à près de 69 % pendant le développement.
+La précision varie de 62 % à 68 % selon la saison. Sur la seule saison 2025-26, la plus facile de la période, les deux modèles atteignent 69 %. La régression logistique donne des probabilités nettement mieux calibrées que XGBoost : l'écart de log loss est significatif, dans le même sens sur les 5 saisons. La variable de loin la plus utile est la **différence de rating Elo** entre les deux équipes ; c'est elle qui a fait passer la précision de 66,8 % à près de 69 % (sur 2025-26) pendant le développement.
 
 **Limites assumées** : le modèle ignore les blessures, les transferts et les joueurs absents. Le score affiché est une heuristique (forme offensive et défensive récente), pas un modèle de régression : le modèle ne sait que classer victoire ou défaite. En tout début de saison, `win_pct` n'a pas encore de valeur, et les premières prédictions reposent surtout sur l'Elo et la forme de fin de saison précédente.
 

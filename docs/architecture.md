@@ -27,6 +27,8 @@ Il n'y a pas de base de données : des fichiers CSV et JSON font office de stock
 | Nettoyage | `preprocessing/clean_data.py` | → `processed/games_clean.csv` (typage strict, cible `home_win`, tri chronologique) |
 | Features | `preprocessing/feature_engineering.py` | → `processed/game_features.csv` |
 | Entraînement | `models/train_model.py` | → `saved_models/*.pkl`, `feature_columns.json`, `model_metrics.json` |
+| Évaluation seule | `models/evaluate_model.py` | walk-forward et comparaisons de variantes, sans toucher aux modèles servis → `saved_models/eval/` |
+| Contrôles | `preprocessing/check_features.py` | cohérence entraînement / API et absence de fuite temporelle |
 | État courant | `preprocessing/team_state.py` | → `processed/team_state.json` |
 | Calendrier | `collectors/fetch_schedule.py` | → `processed/schedule.json` (J-3 à J+14) |
 
@@ -43,11 +45,33 @@ Pour chaque équipe, calculées **avant** le match :
 
 ### Éviter la fuite temporelle
 
-Une feature qui utilise une information connue seulement après le match donne un modèle excellent en test et inutile en production. Trois protections :
+Une feature qui utilise une information connue seulement après le match donne un modèle excellent en test et inutile en production. Quatre protections :
 
 1. Chaque statistique glissante est décalée d'un match (`shift(1)`), et l'Elo enregistré est celui d'**avant** le match.
-2. Le jeu de test est la saison la plus récente (2025-26), jamais mélangée à l'entraînement : pas de découpage aléatoire.
+2. Chaque saison testée est prédite par un modèle entraîné uniquement sur les saisons qui la précèdent : pas de découpage aléatoire (voir « Évaluer honnêtement »).
 3. `game_features.csv` contient aussi le boxscore brut du match joué (`home_fga`, `away_oreb`…), connu seulement après coup. `train_model.py` choisit ses colonnes par **liste blanche de motifs** (`FEATURE_PATTERNS`) et jamais par liste noire : une nouvelle colonne ne devient pas une feature par accident.
+4. `check_features.py` le vérifie automatiquement : il inverse le résultat de quelques matchs et recalcule toutes les features. Celles du match et des matchs antérieurs ne doivent pas bouger, celles des matchs suivants si. Le même script contrôle que l'API calcule exactement les mêmes features que l'entraînement (50 matchs, `team_state.json` reconstruit avec les seuls matchs antérieurs, écart toléré 1e-9).
+
+### Évaluer honnêtement
+
+Jusqu'au 2026-10-19, le modèle était testé sur une seule saison (2025-26, 1 186 matchs) : 69 % de précision, avec un intervalle de confiance d'environ ±2,7 points. Deux problèmes : impossible de dire si une modification aide, et une saison peut être plus facile qu'une autre.
+
+`evaluate_model.py` fait désormais une validation **walk-forward** : 2021-22 est prédite par un modèle entraîné sur 2019-20 et 2020-21, 2022-23 par un modèle entraîné sur les trois saisons précédentes, et ainsi de suite jusqu'à 2025-26 (6 140 matchs prédits). Les matchs où une variable manque (premier match de chaque équipe dans la saison) sont prédits aussi, puisque le site les affiche. XGBoost tourne avec 5 graines aléatoires et on garde la moyenne.
+
+Deux variantes se comparent sur les **mêmes matchs** : on calcule l'écart de log loss match par match, puis un intervalle de confiance par bootstrap en tirant au hasard des journées entières (les matchs d'un même soir ne sont pas indépendants). Cette comparaison appariée est bien plus sensible que de comparer deux intervalles séparés. Règle : un changement n'est adopté que si l'intervalle de l'écart de log loss est entièrement sous zéro.
+
+| Modèle | Précision | Log loss | Brier |
+| --- | --- | --- | --- |
+| Règle naïve (taux de victoire à domicile) | 55,3 % | 0,688 | 0,247 |
+| XGBoost (servi par l'API) | 64,6 % | 0,635 | 0,222 |
+| Régression logistique | 65,5 % | 0,620 | 0,215 |
+
+Ce que ça a montré :
+- La précision varie de 62 % (2022-23) à 68 % (2025-26) d'une saison à l'autre. Le 69 % mesuré sur la seule saison 2025-26 surestimait ce qu'on peut attendre en moyenne.
+- La régression logistique donne de **meilleures probabilités** que XGBoost : écart de log loss de 0,015 (intervalle à 95 % : 0,010 à 0,020), dans le même sens sur les 5 saisons. Leur écart de précision, lui, reste dans le bruit.
+- Résultat négatif : entraîner aussi sur les matchs où une variable manque n'apporte rien de mesurable. L'entraînement se fait donc sur les matchs complets.
+
+Les modèles servis sont ensuite réentraînés sur **toutes** les saisons, 2025-26 comprise : c'est la situation que simule chaque pli (prédire la saison suivante avec tout le passé connu).
 
 ### `features_lib.py` : une seule définition des formules
 
@@ -118,4 +142,6 @@ Si les fichiers deviennent insuffisants : PostgreSQL local (conteneur Docker). T
 | Bilan selon le contexte **en plus** du bilan global | Le remplacer abîmait la précision (échantillon divisé par deux, environ 20 matchs par saison) |
 | Régression logistique avec `StandardScaler` | L'Elo (1300 à 1700) et les pourcentages (0 à 1) ont des échelles très différentes |
 | Matchs de présaison | Gardés, avec un badge « Présaison » : le modèle n'est entraîné que sur la saison régulière |
-| Pistes | Réglage des hyperparamètres, validation croisée temporelle sur plusieurs saisons (le gain de l'Elo n'est mesuré que sur une saison de test), vrai modèle de régression pour le score |
+| Validation walk-forward plutôt qu'une saison de test | Mesure la variation d'une saison à l'autre et permet des comparaisons appariées assez sensibles pour décider |
+| Entraînement sur les matchs complets | Garder les matchs incomplets n'aidait pas (écart dans le bruit) et dégradait la régression logistique sur ces matchs |
+| Pistes (plan du 2026-10-19) | Réglage de l'Elo (K, avantage du terrain, régression entre saisons), bilan lissé en début de saison, choix du modèle servi, fatigue et déplacements, vrai modèle de régression pour le score, joueurs absents |
