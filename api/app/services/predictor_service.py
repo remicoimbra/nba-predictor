@@ -50,6 +50,7 @@ DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 sys.path.insert(0, str(DATA_DIR / "preprocessing"))
 
 from features_lib import (  # type: ignore[import-not-found]  # noqa: E402
+    DEFAULT_ELO_PARAMS,
     ELO_INITIAL,
     FORM_WINDOW,
     ROLLING_WINDOWS,
@@ -68,6 +69,7 @@ logger = logging.getLogger(__name__)
 TEAM_STATE_PATH = DATA_DIR / "processed" / "team_state.json"
 MODEL_PATH = DATA_DIR / "models" / "saved_models" / "xgboost_v1.pkl"
 FEATURE_COLUMNS_PATH = DATA_DIR / "models" / "saved_models" / "feature_columns.json"
+MODEL_METRICS_PATH = DATA_DIR / "models" / "saved_models" / "model_metrics.json"
 
 
 # Familles de features pour expliquer une prédiction : les contributions
@@ -131,10 +133,12 @@ class PredictorService:
         model_path: Path = MODEL_PATH,
         team_state_path: Path = TEAM_STATE_PATH,
         feature_columns_path: Path = FEATURE_COLUMNS_PATH,
+        model_metrics_path: Path = MODEL_METRICS_PATH,
     ):
         self.model_path = model_path
         self.team_state_path = team_state_path
         self.feature_columns_path = feature_columns_path
+        self.model_metrics_path = model_metrics_path
         # Typé Any plutôt que None : le modèle chargé (XGBClassifier via
         # joblib) n'a pas de type statique connu de Pylance ici, et un
         # attribut initialisé à None sans annotation ferait inférer
@@ -145,6 +149,7 @@ class PredictorService:
         self._feature_columns: list[str] = []
         self._team_state: dict = {}
         self._team_state_mtime: float | None = None
+        self._model_elo_params: dict | None = None
         self._load()
 
     def _load(self):
@@ -167,6 +172,11 @@ class PredictorService:
         self._model = joblib.load(self.model_path)
         with open(self.feature_columns_path, encoding="utf-8") as f:
             self._feature_columns = json.load(f)
+        try:
+            with open(self.model_metrics_path, encoding="utf-8") as f:
+                self._model_elo_params = json.load(f).get("elo_params")
+        except (OSError, json.JSONDecodeError):
+            self._model_elo_params = None  # facultatif : seul le contrôle ci-dessous en dépend
         self.reload_team_state()
 
     def reload_team_state(self):
@@ -175,6 +185,28 @@ class PredictorService:
         with open(self.team_state_path, encoding="utf-8") as f:
             self._team_state = json.load(f)
         self._team_state_mtime = mtime
+        self._check_elo_params()
+
+    def _check_elo_params(self):
+        """
+        Avertit si les Elo de team_state.json ont été calculés avec d'autres
+        paramètres que ceux du modèle (model_metrics.json) ou du code
+        (features_lib, qui sert à la régression inter-saison et à la proba
+        « Elo seul »). Cas typique : nouveaux paramètres déployés sans
+        synchro derrière. Les prédictions restent servies, mais faussées :
+        le modèle reçoit des Elo sur une autre échelle que ceux de son
+        entraînement. Remède : sync_to_vps.ps1 (régénère team_state.json).
+        """
+        sources = {
+            "features_lib.py": DEFAULT_ELO_PARAMS.as_dict(),
+            "model_metrics.json": self._model_elo_params,
+            # Absent d'un team_state.json généré avant l'ajout du champ.
+            "team_state.json": self._team_state.get("as_of", {}).get("elo_params"),
+        }
+        if self._model_elo_params is None:
+            del sources["model_metrics.json"]  # ancien fichier ou absent : rien à comparer
+        if any(params != sources["features_lib.py"] for params in sources.values()):
+            logger.warning("Paramètres Elo incohérents, prédictions faussées : %s", sources)
 
     def reload_team_state_if_changed(self):
         """
@@ -221,6 +253,7 @@ class PredictorService:
             rating=team["elo"],
             last_known_season=known_season,
             target_season=target_season,
+            params=DEFAULT_ELO_PARAMS,
         )
         if is_later_season(target_season, known_season):
             return elo, {"all": [], "home": [], "away": []}, True
@@ -417,7 +450,7 @@ class PredictorService:
             predicted_winner="home" if home_win_proba >= 0.5 else "away",
             predicted_home_score=round(predicted_home_score, 1),
             predicted_away_score=round(predicted_away_score, 1),
-            elo_home_probability=round(float(elo_expected_home(row["home_elo"], row["away_elo"])), 4),
+            elo_home_probability=round(float(elo_expected_home(row["home_elo"], row["away_elo"], DEFAULT_ELO_PARAMS)), 4),
             factors=factors,
             base_value=round(base_value, 4),
             features_used=row,

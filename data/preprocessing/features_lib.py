@@ -20,7 +20,7 @@ fichier, pas d'I/O) : entrée -> sortie, testables isolément.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 import numpy as np
 import pandas as pd
@@ -39,9 +39,29 @@ REST_DAYS_CAP = 7
 
 # --- Configuration Elo (partagée batch + live) ---
 ELO_INITIAL = 1500.0
-ELO_K = 20.0              # vitesse d'ajustement du rating après un match
-ELO_HOME_ADVANTAGE = 100  # bonus (en points d'Elo) accordé à l'équipe qui reçoit
-ELO_SEASON_REGRESSION = 0.25  # part de régression vers la moyenne entre 2 saisons
+
+
+@dataclass(frozen=True)
+class EloParams:
+    """Paramètres réglables de l'Elo (voir models/tune_elo.py)."""
+    k: float                  # vitesse d'ajustement du rating après un match
+    home_advantage: float     # bonus (en points d'Elo) accordé à l'équipe qui reçoit
+    season_regression: float  # part de régression vers la moyenne entre 2 saisons
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+# Paramètres utilisés par l'entraînement ET l'API. Les changer impose de
+# régénérer game_features.csv, de réentraîner, puis de régénérer
+# team_state.json (sur le VPS : deploy_to_vps.ps1 puis sync_to_vps.ps1).
+#
+# Réglés le 2026-10-19 par models/tune_elo.py (log loss de l'Elo seul sur
+# 2020-21 -> 2023-24, confirmé sur 2024-25 et 2025-26). Avant : K 20,
+# avantage 100, régression 0,25, qui donnaient au domicile 62 % de chances
+# en moyenne pour 55 % de victoires réelles. Avantage 40 : proba moyenne
+# 55 % ; régression 0,5 : optimum net (plateau de 0,4 à 0,67).
+DEFAULT_ELO_PARAMS = EloParams(k=20.0, home_advantage=40.0, season_regression=0.5)
 
 # Colonnes de boxscore nécessaires pour estimer Pace / Net Rating.
 BOX_SCORE_COLS = ["fga", "fta", "oreb", "tov"]
@@ -51,9 +71,12 @@ BOX_SCORE_COLS = ["fga", "fta", "oreb", "tov"]
 # Elo — fonctions pures, un match à la fois
 # ---------------------------------------------------------------------------
 
-def elo_expected_home(r_home: float, r_away: float) -> float:
-    """Probabilité de victoire attendue pour l'équipe à domicile (avantage du terrain inclus)."""
-    return 1 / (1 + 10 ** (-((r_home + ELO_HOME_ADVANTAGE) - r_away) / 400))
+def elo_expected_home(r_home: float, r_away: float, params: EloParams = DEFAULT_ELO_PARAMS) -> float:
+    """
+    Probabilité de victoire attendue pour l'équipe à domicile (avantage du
+    terrain inclus). Accepte aussi des tableaux numpy / séries pandas.
+    """
+    return 1 / (1 + 10 ** (-((r_home + params.home_advantage) - r_away) / 400))
 
 
 def elo_mov_multiplier(margin: float, elo_diff_for_winner: float) -> float:
@@ -61,7 +84,10 @@ def elo_mov_multiplier(margin: float, elo_diff_for_winner: float) -> float:
     return ((margin + 3) ** 0.8) / (7.5 + 0.006 * max(elo_diff_for_winner, 0))
 
 
-def elo_update(r_home: float, r_away: float, home_win: float, home_score: float, away_score: float):
+def elo_update(
+    r_home: float, r_away: float, home_win: float, home_score: float, away_score: float,
+    params: EloParams = DEFAULT_ELO_PARAMS,
+):
     """
     Met à jour le rating Elo des deux équipes après UN match.
 
@@ -72,26 +98,28 @@ def elo_update(r_home: float, r_away: float, home_win: float, home_score: float,
 
     Retourne (nouveau_r_home, nouveau_r_away).
     """
-    expected_home = elo_expected_home(r_home, r_away)
+    expected_home = elo_expected_home(r_home, r_away, params)
     actual_home = 1.0 if home_win == 1 else 0.0
 
     margin = abs(home_score - away_score)
     elo_diff_for_winner = (
-        (r_home + ELO_HOME_ADVANTAGE - r_away) if actual_home == 1.0
-        else (r_away - (r_home + ELO_HOME_ADVANTAGE))
+        (r_home + params.home_advantage - r_away) if actual_home == 1.0
+        else (r_away - (r_home + params.home_advantage))
     )
     mov_multiplier = elo_mov_multiplier(margin, elo_diff_for_winner)
 
-    delta = ELO_K * mov_multiplier * (actual_home - expected_home)
+    delta = params.k * mov_multiplier * (actual_home - expected_home)
     return r_home + delta, r_away - delta
 
 
-def regress_elo_between_seasons(elo: dict) -> dict:
-    """Régression partielle vers la moyenne (ELO_SEASON_REGRESSION), appliquée au changement de saison."""
-    return {
-        team_id: ELO_INITIAL + (1 - ELO_SEASON_REGRESSION) * (rating - ELO_INITIAL)
-        for team_id, rating in elo.items()
-    }
+def regress_rating(rating: float, params: EloParams = DEFAULT_ELO_PARAMS) -> float:
+    """Régression partielle d'un rating vers la moyenne, appliquée au changement de saison."""
+    return ELO_INITIAL + (1 - params.season_regression) * (rating - ELO_INITIAL)
+
+
+def regress_elo_between_seasons(elo: dict, params: EloParams = DEFAULT_ELO_PARAMS) -> dict:
+    """regress_rating() appliquée à toutes les équipes."""
+    return {team_id: regress_rating(rating, params) for team_id, rating in elo.items()}
 
 
 @dataclass
@@ -101,9 +129,10 @@ class EloTimeline:
     final_state: dict             # {team_id: elo courant, après le dernier match connu}
     final_season: object          # saison du dernier match traité (pour savoir si une régression
                                    # inter-saison doit être appliquée avant de prédire un match futur)
+    params: EloParams             # paramètres avec lesquels l'historique a été calculé
 
 
-def compute_elo_timeline(df_games: pd.DataFrame) -> EloTimeline:
+def compute_elo_timeline(df_games: pd.DataFrame, params: EloParams = DEFAULT_ELO_PARAMS) -> EloTimeline:
     """
     Calcule le rating Elo de chaque équipe match après match, dans l'ordre
     chronologique global (un match met à jour les deux équipes en même
@@ -145,7 +174,7 @@ def compute_elo_timeline(df_games: pd.DataFrame) -> EloTimeline:
 
         if season != current_season:
             if current_season is not None:
-                elo = regress_elo_between_seasons(elo)
+                elo = regress_elo_between_seasons(elo, params)
             current_season = season
 
         r_home = elo.get(home_id, ELO_INITIAL)
@@ -161,7 +190,7 @@ def compute_elo_timeline(df_games: pd.DataFrame) -> EloTimeline:
         if np.isnan(home_score) or np.isnan(away_score) or np.isnan(home_win):
             continue
 
-        elo[home_id], elo[away_id] = elo_update(r_home, r_away, home_win, home_score, away_score)
+        elo[home_id], elo[away_id] = elo_update(r_home, r_away, home_win, home_score, away_score, params)
 
     per_game = pd.DataFrame({
         "nba_game_id": df["nba_game_id"],
@@ -169,7 +198,7 @@ def compute_elo_timeline(df_games: pd.DataFrame) -> EloTimeline:
         "away_elo": away_elo_pre,
     })
 
-    return EloTimeline(per_game=per_game, final_state=elo, final_season=current_season)
+    return EloTimeline(per_game=per_game, final_state=elo, final_season=current_season, params=params)
 
 
 def season_for_date(game_date) -> str:
@@ -192,7 +221,9 @@ def is_later_season(target_season, last_known_season) -> bool:
     return last_known_season is not None and str(target_season) > str(last_known_season)
 
 
-def elo_for_target_season(rating: float, last_known_season, target_season) -> float:
+def elo_for_target_season(
+    rating: float, last_known_season, target_season, params: EloParams = DEFAULT_ELO_PARAMS,
+) -> float:
     """
     Applique la régression inter-saison à un rating Elo courant si la
     saison cible est POSTÉRIEURE à la dernière saison connue (même règle
@@ -206,7 +237,7 @@ def elo_for_target_season(rating: float, last_known_season, target_season) -> fl
     l'historique complet).
     """
     if is_later_season(target_season, last_known_season):
-        return ELO_INITIAL + (1 - ELO_SEASON_REGRESSION) * (rating - ELO_INITIAL)
+        return regress_rating(rating, params)
     return rating
 
 
@@ -218,7 +249,7 @@ def current_elo_for_prediction(timeline: EloTimeline, team_id, target_season) ->
     légère utilisée en production à partir de team_state.json.
     """
     rating = timeline.final_state.get(team_id, ELO_INITIAL)
-    return elo_for_target_season(rating, timeline.final_season, target_season)
+    return elo_for_target_season(rating, timeline.final_season, target_season, timeline.params)
 
 
 # ---------------------------------------------------------------------------

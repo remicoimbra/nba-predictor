@@ -26,7 +26,7 @@ import pandas as pd
 
 import numpy as np
 
-from features_lib import BOX_SCORE_COLS, compute_elo_timeline, elo_update
+from features_lib import BOX_SCORE_COLS, DEFAULT_ELO_PARAMS, EloParams, compute_elo_timeline, elo_update
 
 PROCESSED_DIR = Path(__file__).resolve().parent.parent / "processed"
 INPUT_PATH = PROCESSED_DIR / "games_clean.csv"
@@ -78,7 +78,7 @@ def _to_long_format(df: pd.DataFrame, with_box_score: bool) -> pd.DataFrame:
     return long_df
 
 
-def _with_elo_before_after(df_games: pd.DataFrame, per_game: pd.DataFrame) -> pd.DataFrame:
+def _with_elo_before_after(df_games: pd.DataFrame, per_game: pd.DataFrame, params: EloParams) -> pd.DataFrame:
     """
     Ajoute à chaque match le rating Elo des deux équipes AVANT (fourni par
     compute_elo_timeline) et APRÈS le match (recalculé avec elo_update, la
@@ -100,21 +100,24 @@ def _with_elo_before_after(df_games: pd.DataFrame, per_game: pd.DataFrame) -> pd
         # Ligne corrompue : rating inchangé, comme dans compute_elo_timeline.
         if np.isnan([r_home[i], r_away[i], home_win[i], home_score[i], away_score[i]]).any():
             continue
-        home_after[i], away_after[i] = elo_update(r_home[i], r_away[i], home_win[i], home_score[i], away_score[i])
+        home_after[i], away_after[i] = elo_update(
+            r_home[i], r_away[i], home_win[i], home_score[i], away_score[i], params
+        )
 
     df["home_elo_after"] = home_after
     df["away_elo_after"] = away_after
     return df
 
 
-def build_team_state(df_games: pd.DataFrame) -> dict:
+def build_team_state(df_games: pd.DataFrame, params: EloParams = DEFAULT_ELO_PARAMS) -> dict:
     """
     Construit l'état courant de chaque équipe à partir de l'historique
     complet des matchs.
 
     Retourne un dict prêt à être sérialisé en JSON :
     {
-      "as_of": {"last_game_date": "...", "season": "...", "generated_at": "..."},
+      "as_of": {"last_game_date": "...", "season": "...", "generated_at": "...",
+                "elo_params": {...}},   # paramètres Elo du calcul (comparés par l'API à ceux du modèle)
       "teams": {
         "<team_id>": {
           "team_id": int,
@@ -133,8 +136,8 @@ def build_team_state(df_games: pd.DataFrame) -> dict:
     }
     """
     with_box_score = has_box_score(df_games)
-    timeline = compute_elo_timeline(df_games)
-    long_df = _to_long_format(_with_elo_before_after(df_games, timeline.per_game), with_box_score)
+    timeline = compute_elo_timeline(df_games, params)
+    long_df = _to_long_format(_with_elo_before_after(df_games, timeline.per_game, params), with_box_score)
     current_season = df_games.loc[df_games["game_date"].idxmax(), "season"]
 
     teams = {}
@@ -209,6 +212,7 @@ def build_team_state(df_games: pd.DataFrame) -> dict:
             "last_game_date": df_games["game_date"].max().strftime("%Y-%m-%d"),
             "season": str(current_season),
             "generated_at": pd.Timestamp.now("UTC").isoformat(),
+            "elo_params": params.as_dict(),
         },
         "teams": teams,
     }
