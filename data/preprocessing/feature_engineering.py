@@ -275,8 +275,13 @@ def add_diff_features(df: pd.DataFrame, with_box_score: bool) -> pd.DataFrame:
     return df
 
 
-def main():
-    df_games = load_clean(INPUT_PATH)
+def build_features(df_games: pd.DataFrame) -> pd.DataFrame:
+    """
+    Pipeline complet en mémoire (sans lecture ni écriture de fichier) :
+    games_clean -> 1 ligne de features par match. Séparé de main() pour
+    que preprocessing/check_features.py puisse recalculer les features
+    d'un historique modifié (test anti-fuite).
+    """
     with_box_score = has_box_score(df_games)
     if not with_box_score:
         print(
@@ -295,7 +300,12 @@ def main():
     elo_df = compute_elo_ratings(df_games)
     result = result.merge(elo_df, on="nba_game_id", how="left")
 
-    result = add_diff_features(result, with_box_score)
+    return add_diff_features(result, with_box_score)
+
+
+def main():
+    df_games = load_clean(INPUT_PATH)
+    result = build_features(df_games)
 
     feature_cols = [c for c in result.columns if c.startswith(("home_", "away_", "diff_")) and c not in (
         "home_team_id", "away_team_id", "home_team_abbr", "away_team_abbr", "home_score", "away_score"
