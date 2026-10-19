@@ -124,6 +124,7 @@ def _detail_team(team: TeamRef, snapshot: dict | None) -> dict:
             "away_record": snapshot["away_record"],
             "recent_games": recent,
             "elo_history": snapshot["elo_history"],
+            "absent_players": snapshot["absent_players"],
         })
     return data
 
@@ -231,7 +232,8 @@ def get_game(
     """
     Fiche complète d'un match : prédiction + facteurs (contributions du modèle
     regroupées par famille), proba Elo seule, stats des deux équipes, 10
-    derniers matchs, évolution Elo. 404 si le match est introuvable.
+    derniers matchs, évolution Elo, joueurs habituels absents du dernier
+    match. 404 si le match est introuvable.
     """
     target_date = _parse_date(on_date)
     service = _require_predictor()

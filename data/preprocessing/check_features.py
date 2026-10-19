@@ -27,6 +27,10 @@ match), pas seulement sur celles du modèle (feature_columns.json).
    et boxscores échangés) et on recalcule toutes les features. Celles de ce
    match et des matchs antérieurs ne doivent pas bouger ; celles des matchs
    suivants des deux équipes, si.
+3. Absence de fuite par l'effectif : on retire de la feuille de match le
+   meilleur joueur de l'équipe à domicile (comme s'il avait été absent).
+   Aucune feature de ce match ni des matchs antérieurs ne doit bouger ; le
+   lineup_delta du match suivant de l'équipe, si.
 
 Usage :
     cd data
@@ -44,7 +48,8 @@ import numpy as np
 import pandas as pd
 
 from feature_engineering import build_features
-from features_lib import SCORE_WINDOW, expected_margin, expected_total, rounded_score, split_score
+from features_lib import SCORE_WINDOW, expected_margin, expected_total, game_score, rounded_score, split_score
+from player_games import load_player_games
 from team_state import build_team_state
 
 DATA_DIR = Path(__file__).resolve().parent.parent
@@ -114,7 +119,9 @@ def batch_score(service: PredictorService, batch_row: pd.Series) -> tuple[int, i
     return rounded_score(*split_score(total, margin), p >= 0.5)
 
 
-def check_train_live_consistency(clean: pd.DataFrame, batch: pd.DataFrame, columns: list[str]) -> bool:
+def check_train_live_consistency(
+    clean: pd.DataFrame, players: pd.DataFrame, batch: pd.DataFrame, columns: list[str],
+) -> bool:
     counts = clean["season"].value_counts()
     season = max(s for s, n in counts.items() if n >= MIN_SEASON_GAMES)
     games = clean[clean["season"] == season].sort_values(["game_date", "nba_game_id"])
@@ -132,7 +139,9 @@ def check_train_live_consistency(clean: pd.DataFrame, batch: pd.DataFrame, colum
         state_path = Path(tmp) / "team_state.json"
         service = None
         for game_date, day_games in sample.groupby("game_date"):
-            state = build_team_state(clean[clean["game_date"] < game_date])
+            # Feuilles joueur complètes : build_team_state ne garde que celles
+            # des matchs qu'on lui passe.
+            state = build_team_state(clean[clean["game_date"] < game_date], players)
             with open(state_path, "w", encoding="utf-8") as f:
                 json.dump(state, f)
             if service is None:
@@ -194,29 +203,36 @@ def flipped_result(clean: pd.DataFrame, game_id) -> pd.DataFrame:
     return modified
 
 
-def check_no_leakage(clean: pd.DataFrame, batch: pd.DataFrame, columns: list[str]) -> bool:
+def leak_candidates(clean: pd.DataFrame) -> tuple[str, pd.DataFrame]:
+    """LEAK_GAMES matchs d'une saison du milieu de l'historique, au moins 30 jours avant sa fin."""
     seasons = sorted(clean["season"].unique())
     season = seasons[len(seasons) // 2]
     games = clean[clean["season"] == season]
     candidates = games[games["game_date"] < games["game_date"].max() - pd.Timedelta(days=30)]
-    picked = candidates.sample(n=LEAK_GAMES, random_state=1)
+    return season, candidates.sample(n=LEAK_GAMES, random_state=1)
+
+
+def changed(base: pd.DataFrame, feats: pd.DataFrame, index, columns: list[str]) -> np.ndarray:
+    """Masque (matchs × colonnes) des features qui diffèrent entre les deux calculs."""
+    a = base.loc[index, columns].to_numpy(dtype=float)
+    b = feats.loc[index, columns].to_numpy(dtype=float)
+    return ~(np.isclose(a, b, rtol=0, atol=TOLERANCE) | (np.isnan(a) & np.isnan(b)))
+
+
+def check_no_leakage(clean: pd.DataFrame, players: pd.DataFrame, batch: pd.DataFrame, columns: list[str]) -> bool:
+    season, picked = leak_candidates(clean)
     base = batch.set_index("nba_game_id")
 
     ok = True
     for game in picked.itertuples():
-        feats = build_features(flipped_result(clean, game.nba_game_id)).set_index("nba_game_id")
+        feats = build_features(flipped_result(clean, game.nba_game_id), players).set_index("nba_game_id")
         dates = feats["game_date"]
         teams = (game.home_team_id, game.away_team_id)
 
         before = feats.index[dates <= game.game_date]  # le match lui-même, les matchs antérieurs et ceux du même soir
-        a = base.loc[before, columns].to_numpy(dtype=float)
-        b = feats.loc[before, columns].to_numpy(dtype=float)
-        leaked = ~(np.isclose(a, b, rtol=0, atol=TOLERANCE) | (np.isnan(a) & np.isnan(b)))
-
+        leaked = changed(base, feats, before, columns)
         later = feats.index[(dates > game.game_date) & (feats["home_team_id"].isin(teams) | feats["away_team_id"].isin(teams))]
-        a = base.loc[later, columns].to_numpy(dtype=float)
-        b = feats.loc[later, columns].to_numpy(dtype=float)
-        propagated = (~(np.isclose(a, b, rtol=0, atol=TOLERANCE) | (np.isnan(a) & np.isnan(b)))).any()
+        propagated = changed(base, feats, later, columns).any()
 
         if leaked.any():
             cols = [columns[j] for j in np.where(leaked.any(axis=0))[0]]
@@ -230,19 +246,53 @@ def check_no_leakage(clean: pd.DataFrame, batch: pd.DataFrame, columns: list[str
     return ok
 
 
+def check_no_lineup_leakage(clean: pd.DataFrame, players: pd.DataFrame, batch: pd.DataFrame, columns: list[str]) -> bool:
+    season, picked = leak_candidates(clean)
+    base = batch.set_index("nba_game_id")
+
+    ok = True
+    for game in picked.itertuples():
+        team = game.home_team_id
+        roster = players[(players["nba_game_id"] == game.nba_game_id) & (players["team_id"] == team)]
+        best = roster.loc[game_score(roster).idxmax(), "player_id"]
+        removed = players.drop(roster.index[roster["player_id"] == best])
+        feats = build_features(clean, removed).set_index("nba_game_id")
+        dates = feats["game_date"]
+
+        leaked = changed(base, feats, feats.index[dates <= game.game_date], columns)
+        team_later = feats[(dates > game.game_date) & ((feats["home_team_id"] == team) | (feats["away_team_id"] == team))]
+        following = team_later.sort_values("game_date").iloc[0]
+        side = "home" if following["home_team_id"] == team else "away"
+        propagated = not same_value(following[f"{side}_lineup_delta"], base.loc[following.name, f"{side}_lineup_delta"])
+
+        if leaked.any():
+            cols = [columns[j] for j in np.where(leaked.any(axis=0))[0]]
+            print(f"  ÉCHEC : retirer le joueur {best} de {game.nba_game_id} change des features antérieures ou du match : {cols}")
+            ok = False
+        elif not propagated:
+            print(f"  ÉCHEC : retirer le joueur {best} de {game.nba_game_id} ne change pas l'effectif du match suivant")
+            ok = False
+    if ok:
+        print(f"  OK : {LEAK_GAMES} matchs de {season}, meilleur joueur retiré : aucune feature antérieure modifiée, effectif du match suivant modifié")
+    return ok
+
+
 def main():
     clean = pd.read_csv(CLEAN_PATH, parse_dates=["game_date"])
+    players = load_player_games()
     with open(FEATURE_COLUMNS_PATH, encoding="utf-8") as f:
         model_columns = json.load(f)
-    batch = build_features(clean)
+    batch = build_features(clean, players)
     columns = candidate_feature_cols(batch)
 
     print("0. game_features.csv à jour")
     results = [check_features_file_up_to_date(batch, columns, model_columns)]
     print("1. Cohérence entraînement / prédiction")
-    results.append(check_train_live_consistency(clean, batch, columns))
+    results.append(check_train_live_consistency(clean, players, batch, columns))
     print("2. Absence de fuite temporelle")
-    results.append(check_no_leakage(clean, batch, columns))
+    results.append(check_no_leakage(clean, players, batch, columns))
+    print("3. Absence de fuite par l'effectif")
+    results.append(check_no_lineup_leakage(clean, players, batch, columns))
 
     if not all(results):
         sys.exit(1)

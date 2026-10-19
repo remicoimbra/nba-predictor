@@ -4,11 +4,12 @@ sync_to_vps.ps1
 Synchro quotidienne des données NBA, à lancer depuis un PC à IP résidentielle
 (stats.nba.com et cdn.nba.com bloquent l'IP du VPS, cf. CLAUDE.md "Déploiement") :
 
-  1. fetch_games.py --refresh  : nouveaux matchs joués de la saison en cours
-  2. clean_data.py             : -> games_clean.csv
-  3. team_state.py             : -> team_state.json (Elo, forme, win%)
-  4. fetch_schedule.py         : -> schedule.json (calendrier J-3 -> J+14)
-  5. envoi de team_state.json + schedule.json sur le VPS (scp puis mv atomique)
+  1. fetch_games.py --refresh        : nouveaux matchs joués de la saison en cours
+  2. fetch_player_logs.py --refresh  : feuilles de match par joueur (effectif, absences)
+  3. clean_data.py                   : -> games_clean.csv
+  4. team_state.py                   : -> team_state.json (Elo, forme, win%, effectif)
+  5. fetch_schedule.py               : -> schedule.json (calendrier J-3 -> J+14)
+  6. envoi de team_state.json + schedule.json sur le VPS (scp puis mv atomique)
 
 L'API sur le VPS détecte les nouveaux fichiers toute seule (date de
 modification), sans redémarrage. Pas de réentraînement du modèle ici : il
@@ -70,6 +71,7 @@ try {
     Push-Location $DataDir
     try {
         Invoke-Step "Historique (saison en cours)" $Python @("collectors\fetch_games.py", "--refresh")
+        Invoke-Step "Feuilles de match joueur" $Python @("collectors\fetch_player_logs.py", "--refresh")
         Invoke-Step "Nettoyage" $Python @("preprocessing\clean_data.py")
         Invoke-Step "État des équipes" $Python @("preprocessing\team_state.py")
         Invoke-Step "Calendrier" $Python @("collectors\fetch_schedule.py")

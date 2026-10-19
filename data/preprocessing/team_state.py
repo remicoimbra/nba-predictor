@@ -26,7 +26,18 @@ import pandas as pd
 
 import numpy as np
 
-from features_lib import BOX_SCORE_COLS, DEFAULT_ELO_PARAMS, EloParams, compute_elo_timeline, elo_update
+from features_lib import (
+    BOX_SCORE_COLS,
+    DEFAULT_ELO_PARAMS,
+    LINEUP_TOP,
+    LINEUP_WINDOW,
+    EloParams,
+    compute_elo_timeline,
+    elo_update,
+    lineup_strength,
+    player_value_timeline,
+)
+from player_games import coverage_warning, load_player_games, restrict_to_games
 
 PROCESSED_DIR = Path(__file__).resolve().parent.parent / "processed"
 INPUT_PATH = PROCESSED_DIR / "games_clean.csv"
@@ -109,7 +120,54 @@ def _with_elo_before_after(df_games: pd.DataFrame, per_game: pd.DataFrame, param
     return df
 
 
-def build_team_state(df_games: pd.DataFrame, params: EloParams = DEFAULT_ELO_PARAMS) -> dict:
+REGULAR_SHARE = 0.5  # « joueur habituel » : entré en jeu dans au moins la moitié des derniers matchs
+
+
+class _Lineups:
+    """Effectifs des matchs connus et valeur COURANTE de chaque joueur (après son dernier match)."""
+
+    def __init__(self, player_games: pd.DataFrame):
+        values = player_value_timeline(player_games)  # trié par joueur puis date
+        self.value = values.groupby("player_id")["value"].last().to_dict()
+        self.name = player_games.drop_duplicates("player_id", keep="last").set_index("player_id")["player_name"].to_dict()
+        self.players = player_games.groupby(["team_id", "nba_game_id"])["player_id"].apply(list).to_dict()
+
+    def state(self, team_id: int, team_game_ids: list) -> dict:
+        """
+        `team_game_ids` : matchs de la saison en cours de l'équipe, du plus
+        ancien au plus récent. strengths -> features_lib.lineup_delta() (API) ;
+        absent : joueurs habituels du top LINEUP_TOP absents du dernier
+        match (affichage seulement).
+        """
+        games = team_game_ids[-LINEUP_WINDOW:]
+        rosters = [self.players.get((team_id, g)) for g in games]
+        strengths = [
+            lineup_strength([self.value[p] for p in roster]) if roster else None for roster in rosters
+        ]
+        absent = []
+        known = [r for r in rosters if r]
+        if rosters and rosters[-1]:
+            counts = pd.Series([p for r in known for p in r]).value_counts()
+            regulars = sorted(
+                (p for p, n in counts.items() if n >= REGULAR_SHARE * len(known)),
+                key=lambda p: self.value[p], reverse=True,
+            )[:LINEUP_TOP]
+            absent = [
+                {
+                    "player_id": int(p),
+                    "name": str(self.name.get(p, "")),
+                    "value": round(float(self.value[p]), 1),
+                    "games": int(counts[p]),
+                    "of": len(known),
+                }
+                for p in regulars if p not in rosters[-1]
+            ]
+        return {"strengths": strengths, "absent": absent}
+
+
+def build_team_state(
+    df_games: pd.DataFrame, player_games: pd.DataFrame, params: EloParams = DEFAULT_ELO_PARAMS,
+) -> dict:
     """
     Construit l'état courant de chaque équipe à partir de l'historique
     complet des matchs.
@@ -130,6 +188,10 @@ def build_team_state(df_games: pd.DataFrame, params: EloParams = DEFAULT_ELO_PAR
                                        # matchs (affichage seulement)
           "season_results": {"all": [...], "home": [...], "away": [...]}
                                        # 0/1, saison courante uniquement -> features_lib.win_pct()
+          "lineup": {"strengths": [...], "absent": [...]}
+                                       # force des LINEUP_WINDOW derniers effectifs de la saison,
+                                       # valeurs des joueurs à ce jour -> features_lib.lineup_delta() ;
+                                       # absent : joueurs habituels absents du dernier match (affichage)
         },
         ...
       }
@@ -139,6 +201,7 @@ def build_team_state(df_games: pd.DataFrame, params: EloParams = DEFAULT_ELO_PAR
     timeline = compute_elo_timeline(df_games, params)
     long_df = _to_long_format(_with_elo_before_after(df_games, timeline.per_game, params), with_box_score)
     current_season = df_games.loc[df_games["game_date"].idxmax(), "season"]
+    lineups = _Lineups(restrict_to_games(player_games, df_games))
 
     teams = {}
     for _, team_games in long_df.groupby("team_id"):
@@ -205,6 +268,7 @@ def build_team_state(df_games: pd.DataFrame, params: EloParams = DEFAULT_ELO_PAR
             "recent_games": recent_games,
             "season_results": season_results,
             "elo_history": elo_history,
+            "lineup": lineups.state(team_id_int, team_games.loc[season_mask, "nba_game_id"].tolist()),
         }
 
     return {
@@ -221,8 +285,13 @@ def build_team_state(df_games: pd.DataFrame, params: EloParams = DEFAULT_ELO_PAR
 def main():
     df_games = pd.read_csv(INPUT_PATH, parse_dates=["game_date"])
     print(f"Chargé : {len(df_games)} matchs")
+    player_games = load_player_games()
+    current_season = df_games.loc[df_games["game_date"].idxmax(), "season"]
+    warning = coverage_warning(player_games, df_games, season=current_season)
+    if warning:
+        print(warning)
 
-    state = build_team_state(df_games)
+    state = build_team_state(df_games, player_games)
     print(f"Saison courante détectée : {state['as_of']['season']}")
     print(f"Équipes traitées : {len(state['teams'])}")
 

@@ -115,6 +115,7 @@ FEATURE_PATTERNS = (
     "avg_pts_allowed_last",
     "net_rtg_last",
     "elo",           # home_elo, away_elo, diff_elo
+    "lineup_delta",  # home/away/diff_lineup_delta (effectif, depuis le 2026-10-19)
 )
 
 # Le modèle n'utilise que les écarts domicile - extérieur (diff_*) et les
@@ -123,7 +124,8 @@ FEATURE_PATTERNS = (
 # saisons ; XGBoost inchangé (dans le bruit). Les deux Elo restent : EloOnly
 # en a besoin, et ils faisaient mieux que diff_* seul sur les saisons de
 # réglage. Les autres colonnes home_/away_ sont toujours calculées (l'API
-# les affiche sur la fiche match).
+# les affiche sur la fiche match). diff_lineup_delta (étape 6) porte le
+# total à 12 features.
 MODEL_LEVEL_COLS = ("home_elo", "away_elo")
 
 # XGBoost : nombre d'arbres choisi par arrêt précoce (voir XGBoostEarlyStopping).

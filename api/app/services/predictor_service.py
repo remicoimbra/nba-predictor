@@ -64,6 +64,7 @@ from features_lib import (  # type: ignore[import-not-found]  # noqa: E402
     factor_family,
     is_later_season,
     linear_contributions,
+    lineup_delta,
     net_rtg_from_boxscore,
     rest_days,
     rolling_mean_last_n,
@@ -181,6 +182,10 @@ class PredictorService:
             self._team_state = json.load(f)
         self._team_state_mtime = mtime
         self._check_elo_params()
+        if any("lineup" not in t for t in self._team_state.get("teams", {}).values()):
+            # Fichier antérieur à l'étape 6 (déploiement sans synchro derrière) :
+            # effectif traité comme « habituel » (lineup_delta = 0).
+            logger.warning("team_state.json sans données d'effectif : relancer sync_to_vps.ps1")
 
     def _check_elo_params(self):
         """
@@ -287,14 +292,18 @@ class PredictorService:
 
         # Changement de saison (cf. _season_context) : win_pct_last10 et les
         # moyennes glissantes ne sont pas remis à zéro, comme à l'entraînement.
-        elo, season_results, _ = self._season_context(team, as_of_date)
+        elo, season_results, new_season = self._season_context(team, as_of_date)
         context_results = season_results["home" if is_home else "away"]
+        # Premier match d'une nouvelle saison : 0, comme à l'entraînement
+        # (l'effectif est comparé aux matchs de la saison en cours seulement).
+        strengths = [] if new_season else team.get("lineup", {}).get("strengths", [])
 
         features = {
             "win_pct": win_pct(season_results["all"]),
             "win_pct_context": win_pct(context_results),
             "win_pct_last10": win_pct(wins_recent[-FORM_WINDOW:]),
             "rest_days": rest_days(team["last_game_date"], as_of_date),
+            "lineup_delta": lineup_delta(strengths),
             "elo": elo,
         }
         for w in ROLLING_WINDOWS:
@@ -370,6 +379,9 @@ class PredictorService:
                 for g in team["recent_games"]
             ],
             "elo_history": team.get("elo_history", []),
+            # Joueurs habituels absents du dernier match (supposés encore
+            # absents par le modèle) ; sans objet en début de nouvelle saison.
+            "absent_players": [] if new_season else team.get("lineup", {}).get("absent", []),
         }
 
     def _factors(self, X: pd.DataFrame) -> tuple[list, float]:

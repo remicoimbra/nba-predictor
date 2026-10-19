@@ -39,6 +39,14 @@ Features "Elo" (v3) :
                                Contrairement à win_pct, tient compte de la force
                                de l'adversaire.
 
+Feature "effectif" (étape 6, 2026-10-19) :
+- lineup_delta               : force de l'effectif du dernier match de l'équipe
+                               moins sa force moyenne sur ses 10 derniers matchs
+                               (Game Score des joueurs entrés en jeu, feuilles de
+                               match par joueur de collectors/fetch_player_logs.py).
+                               Négatif : des joueurs importants manquaient au
+                               dernier match. Voir features_lib.py.
+
 Features différentielles (calculées une fois revenu au format 1-ligne-par-match) :
 - diff_win_pct, diff_win_pct_last10, diff_net_rtg_last5, diff_net_rtg_last10,
   diff_rest_days
@@ -66,7 +74,9 @@ from features_lib import (
     REST_DAYS_CAP,
     ROLLING_WINDOWS,
     compute_elo_timeline,
+    compute_lineup_deltas,
 )
+from player_games import coverage_warning, load_player_games, restrict_to_games
 
 PROCESSED_DIR = Path(__file__).resolve().parent.parent / "processed"
 INPUT_PATH = PROCESSED_DIR / "games_clean.csv"
@@ -230,7 +240,7 @@ def compute_elo_ratings(df_games: pd.DataFrame) -> pd.DataFrame:
 
 def back_to_wide(df_games: pd.DataFrame, long_df: pd.DataFrame, with_box_score: bool) -> pd.DataFrame:
     """Rejoint les features calculées sur le format 1-ligne-par-match."""
-    feature_cols = ["nba_game_id", "team_id", "win_pct", "win_pct_context", "win_pct_last10", "rest_days"]
+    feature_cols = ["nba_game_id", "team_id", "win_pct", "win_pct_context", "win_pct_last10", "rest_days", "lineup_delta"]
     for w in ROLLING_WINDOWS:
         feature_cols += [f"avg_pts_scored_last{w}", f"avg_pts_allowed_last{w}"]
         if with_box_score:
@@ -268,6 +278,7 @@ def add_diff_features(df: pd.DataFrame, with_box_score: bool) -> pd.DataFrame:
     df["diff_win_pct_last10"] = df["home_win_pct_last10"] - df["away_win_pct_last10"]
     df["diff_rest_days"] = df["home_rest_days"] - df["away_rest_days"]
     df["diff_elo"] = df["home_elo"] - df["away_elo"]
+    df["diff_lineup_delta"] = df["home_lineup_delta"] - df["away_lineup_delta"]
     for w in ROLLING_WINDOWS:
         df[f"diff_avg_pts_scored_last{w}"] = df[f"home_avg_pts_scored_last{w}"] - df[f"away_avg_pts_scored_last{w}"]
         if with_box_score:
@@ -275,12 +286,12 @@ def add_diff_features(df: pd.DataFrame, with_box_score: bool) -> pd.DataFrame:
     return df
 
 
-def build_features(df_games: pd.DataFrame) -> pd.DataFrame:
+def build_features(df_games: pd.DataFrame, player_games: pd.DataFrame) -> pd.DataFrame:
     """
     Pipeline complet en mémoire (sans lecture ni écriture de fichier) :
-    games_clean -> 1 ligne de features par match. Séparé de main() pour
-    que preprocessing/check_features.py puisse recalculer les features
-    d'un historique modifié (test anti-fuite).
+    games_clean + feuilles de match par joueur -> 1 ligne de features par
+    match. Séparé de main() pour que preprocessing/check_features.py puisse
+    recalculer les features d'un historique modifié (test anti-fuite).
     """
     with_box_score = has_box_score(df_games)
     if not with_box_score:
@@ -294,6 +305,8 @@ def build_features(df_games: pd.DataFrame) -> pd.DataFrame:
     if with_box_score:
         long_df = add_advanced_ratings(long_df)
     long_df = add_rolling_features(long_df, with_box_score)
+    lineup = compute_lineup_deltas(long_df, restrict_to_games(player_games, df_games))
+    long_df = long_df.merge(lineup, on=["team_id", "nba_game_id"], how="left")
 
     result = back_to_wide(df_games, long_df, with_box_score)
 
@@ -305,7 +318,11 @@ def build_features(df_games: pd.DataFrame) -> pd.DataFrame:
 
 def main():
     df_games = load_clean(INPUT_PATH)
-    result = build_features(df_games)
+    player_games = load_player_games()
+    warning = coverage_warning(player_games, df_games)
+    if warning:
+        print(warning)
+    result = build_features(df_games, player_games)
 
     feature_cols = [c for c in result.columns if c.startswith(("home_", "away_", "diff_")) and c not in (
         "home_team_id", "away_team_id", "home_team_abbr", "away_team_abbr", "home_score", "away_score"

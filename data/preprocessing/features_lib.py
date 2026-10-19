@@ -308,6 +308,136 @@ def net_rtg_from_boxscore(pts_scored: float, pts_allowed: float, fga: float, ore
 
 
 # ---------------------------------------------------------------------------
+# Effectif (absences) — partagé entre feature_engineering.py (batch) et
+# team_state.py (état courant, lu par l'API)
+# ---------------------------------------------------------------------------
+#
+# Les blessures ne sont connues avec certitude qu'une demi-heure avant le
+# match ; la synchro tourne à 10 h. On ne peut donc s'appuyer que sur les
+# matchs déjà joués : un joueur absent du dernier match de son équipe est
+# supposé encore absent.
+#
+# - valeur d'un joueur : Game Score moyen (Hollinger) sur ses
+#   PLAYER_VALUE_GAMES dernières apparitions avant le match (toutes équipes,
+#   saisons précédentes comprises) ;
+# - force d'un effectif : somme des LINEUP_TOP meilleures valeurs parmi les
+#   joueurs entrés en jeu (le top 8 neutralise les fins de match pliées, où
+#   les remplaçants de fin de banc entrent) ;
+# - lineup_delta : force de l'effectif du dernier match de l'équipe moins la
+#   force moyenne de ses LINEUP_WINDOW derniers matchs de la saison, toutes
+#   évaluées avec les valeurs des joueurs à la date du match. Négatif :
+#   des joueurs importants manquaient au dernier match, ce que l'Elo et la
+#   forme récente (calculés sur l'effectif habituel) ne voient pas encore.
+#   0 au premier match de la saison (aucune information).
+#
+# Mesuré le 2026-10-19 en walk-forward (CLAUDE.md, "Étape 6") : régression
+# logistique -0,0023 de log loss [-0,0041 ; -0,0007], tenu sur 2024-25 +
+# 2025-26 ; le gain se fait sur le tiers des matchs où l'effectif a changé.
+
+PLAYER_VALUE_GAMES = 15
+LINEUP_WINDOW = 10
+LINEUP_TOP = 8
+
+# Colonnes des feuilles de match par joueur (preprocessing/player_games.py).
+PLAYER_STAT_COLS = ["pts", "fgm", "fga", "ftm", "fta", "oreb", "dreb", "ast", "stl", "blk", "tov", "pf"]
+
+
+def game_score(stats) -> pd.Series:
+    """Game Score de Hollinger d'une ou plusieurs lignes joueur-match (colonnes PLAYER_STAT_COLS)."""
+    s = stats
+    return (
+        s["pts"] + 0.4 * s["fgm"] - 0.7 * s["fga"] - 0.4 * (s["fta"] - s["ftm"]) + 0.7 * s["oreb"]
+        + 0.3 * s["dreb"] + s["stl"] + 0.7 * s["ast"] + 0.7 * s["blk"] - 0.4 * s["pf"] - s["tov"]
+    )
+
+
+def player_value_timeline(player_games: pd.DataFrame) -> pd.DataFrame:
+    """
+    Valeur de chaque joueur APRÈS chacune de ses apparitions (moyenne de son
+    Game Score sur ses PLAYER_VALUE_GAMES dernières apparitions, celle-ci
+    comprise) : c'est sa valeur pour tout match d'une date ultérieure.
+    Colonnes : player_id, game_date, value.
+    """
+    p = player_games.sort_values(["player_id", "game_date", "nba_game_id"]).copy()
+    p["gmsc"] = game_score(p)
+    p["value"] = (
+        p.groupby("player_id")["gmsc"].rolling(PLAYER_VALUE_GAMES, min_periods=1).mean()
+        .reset_index(level=0, drop=True)
+    )
+    return p[["player_id", "game_date", "value"]]
+
+
+def lineup_strength(values) -> float:
+    """Force d'un effectif : somme des LINEUP_TOP meilleures valeurs."""
+    return float(np.sort(np.asarray(values, dtype=float))[::-1][:LINEUP_TOP].sum())
+
+
+def lineup_delta(strengths: list) -> float:
+    """
+    Force du dernier match moins la force moyenne des LINEUP_WINDOW derniers
+    (liste du plus ancien au plus récent, matchs de la saison en cours ;
+    None/NaN = match sans feuille joueur, ignoré dans la moyenne). 0 si la
+    liste est vide ou si le dernier match n'a pas de feuille joueur.
+    """
+    window = np.array([np.nan if s is None else s for s in strengths[-LINEUP_WINDOW:]], dtype=float)
+    if len(window) == 0 or np.isnan(window[-1]):
+        return 0.0
+    return float(window[-1] - np.nanmean(window))
+
+
+def compute_lineup_deltas(team_games: pd.DataFrame, player_games: pd.DataFrame) -> pd.DataFrame:
+    """
+    lineup_delta de chaque équipe AVANT chacun de ses matchs (version batch,
+    pour l'entraînement ; même calcul que lineup_delta() appliqué match par
+    match, vérifié par check_features.py).
+
+    `team_games` : une ligne par équipe et par match (team_id, nba_game_id,
+    game_date, season). `player_games` : feuilles de match par joueur, déjà
+    limitées aux matchs de `team_games`. Retourne team_id, nba_game_id,
+    lineup_delta.
+    """
+    tg = team_games[["team_id", "nba_game_id", "game_date", "season"]].sort_values(
+        ["team_id", "game_date", "nba_game_id"]
+    ).reset_index(drop=True)
+    tg["idx"] = tg.groupby(["team_id", "season"]).cumcount()
+
+    # Participants de chaque match passé, rattachés aux LINEUP_WINDOW matchs
+    # suivants de la même équipe dans la saison (lag 1 = dernier match joué).
+    part = player_games[["player_id", "team_id", "nba_game_id"]].merge(
+        tg[["team_id", "nba_game_id", "season", "idx"]], on=["team_id", "nba_game_id"]
+    )
+    targets = tg.rename(columns={"idx": "target_idx", "nba_game_id": "target_id", "game_date": "target_date"})
+    w = pd.concat(
+        [part.assign(target_idx=part["idx"] + lag, lag=lag) for lag in range(1, LINEUP_WINDOW + 1)],
+        ignore_index=True,
+    ).merge(targets, on=["team_id", "season", "target_idx"])
+
+    # Valeur de chaque joueur juste avant la date du match cible.
+    values = player_value_timeline(player_games).sort_values("game_date")
+    w = pd.merge_asof(
+        w.sort_values("target_date"), values.rename(columns={"game_date": "value_date"}),
+        left_on="target_date", right_on="value_date", by="player_id", allow_exact_matches=False,
+    )
+
+    # lineup_strength() de chaque effectif passé, vectorisé : LINEUP_TOP
+    # meilleures valeurs de chaque (équipe, match cible, lag), sommées.
+    keys = ["team_id", "target_id", "lag"]
+    w = w.sort_values(keys + ["value"], ascending=[True, True, True, False])
+    top = w[w.groupby(keys).cumcount() < LINEUP_TOP]
+    strength = (
+        top.groupby(keys)["value"].sum().unstack("lag")
+        .reindex(columns=range(1, LINEUP_WINDOW + 1))
+    )
+    delta = (strength[1] - strength.mean(axis=1)).fillna(0.0)
+    out = tg[["team_id", "nba_game_id"]].merge(
+        delta.rename("lineup_delta").rename_axis(["team_id", "nba_game_id"]).reset_index(),
+        on=["team_id", "nba_game_id"], how="left",
+    )
+    out["lineup_delta"] = out["lineup_delta"].fillna(0.0)  # premier match de la saison
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Score prédit — partagé entre models/score_model.py (évaluation, réglage de
 # sigma) et predictor_service.py (score affiché)
 # ---------------------------------------------------------------------------
@@ -381,6 +511,7 @@ FACTOR_FAMILIES = [
     ("offense", "Attaque récente", ("avg_pts_scored_last",)),
     ("defense", "Défense récente", ("avg_pts_allowed_last",)),
     ("rest", "Jours de repos", ("rest_days",)),
+    ("lineup", "Effectif", ("lineup_delta",)),
 ]
 
 
