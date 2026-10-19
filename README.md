@@ -26,10 +26,11 @@ Validation **walk-forward** : chaque saison de 2021-22 à 2025-26 est prédite p
 | Modèle | Précision | Log loss | Brier |
 | --- | --- | --- | --- |
 | Règle naïve « le domicile gagne » | 55,3 % | 0,688 | 0,247 |
-| XGBoost (utilisé par l'API) | 64,6 % | 0,635 | 0,222 |
-| Régression logistique | 65,5 % | 0,620 | 0,215 |
+| XGBoost (utilisé par l'API) | 64,6 % | 0,633 | 0,221 |
+| Régression logistique | 65,6 % | 0,619 | 0,215 |
+| Elo seul (sans apprentissage) | 65,9 % | 0,618 | 0,215 |
 
-La précision varie de 62 % à 68 % selon la saison. Sur la seule saison 2025-26, la plus facile de la période, les deux modèles atteignent 69 %. La régression logistique donne des probabilités nettement mieux calibrées que XGBoost : l'écart de log loss est significatif, dans le même sens sur les 5 saisons. La variable de loin la plus utile est la **différence de rating Elo** entre les deux équipes ; c'est elle qui a fait passer la précision de 66,8 % à près de 69 % (sur 2025-26) pendant le développement.
+La précision varie de 62 % à 69 % selon la saison. Sur la seule saison 2025-26, la plus facile de la période, les trois modèles atteignent 69 %. La régression logistique donne des probabilités nettement mieux calibrées que XGBoost : l'écart de log loss est significatif, dans le même sens sur les 5 saisons. Les paramètres de l'Elo (avantage du terrain, régression entre saisons) ont été réglés sur des saisons passées puis confirmés sur deux saisons jamais vues ; l'Elo seul fait alors aussi bien que la régression logistique. La variable de loin la plus utile est la **différence de rating Elo** entre les deux équipes ; c'est elle qui a fait passer la précision de 66,8 % à près de 69 % (sur 2025-26) pendant le développement.
 
 **Limites assumées** : le modèle ignore les blessures, les transferts et les joueurs absents. Le score affiché est une heuristique (forme offensive et défensive récente), pas un modèle de régression : le modèle ne sait que classer victoire ou défaite. En tout début de saison, `win_pct` n'a pas encore de valeur, et les premières prédictions reposent surtout sur l'Elo et la forme de fin de saison précédente.
 
