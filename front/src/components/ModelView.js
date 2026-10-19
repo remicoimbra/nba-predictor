@@ -9,7 +9,7 @@ import {
 } from "@/components/charts/ModelCharts";
 import { ErrorState, Loading } from "@/components/States";
 import { EASE_OUT } from "@/lib/charts";
-import { dec, num, pct1 } from "@/lib/format";
+import { dec, int, num, pct, pct1 } from "@/lib/format";
 import { useApi } from "@/lib/useApi";
 import { getModelMetrics } from "@/services/api";
 
@@ -28,8 +28,8 @@ export default function ModelView() {
         <p className="mt-3 text-text-2">
           Un classifieur XGBoost prédit si l&apos;équipe à domicile gagne, à
           partir de statistiques calculées avant chaque match. Il est comparé à
-          une régression logistique et à la règle naïve « le domicile gagne
-          toujours ».
+          une régression logistique, au rating Elo seul et à la règle naïve
+          «&nbsp;le domicile gagne toujours&nbsp;».
         </p>
       </header>
 
@@ -60,6 +60,7 @@ function Card({ title, subtitle, children, className = "" }) {
 
 function ModelDetail({ m }) {
   const served = m.models.find((x) => x.key === m.served_model);
+  const elo = m.elo_params; // absent des métriques d'avant le 2026-10-19
   const gain = served.accuracy - m.baseline_accuracy;
   const seasons = m.evaluation.test_seasons;
   const period = `${seasons[0]} → ${seasons.at(-1)}`;
@@ -155,9 +156,18 @@ function ModelDetail({ m }) {
             <p>
               Chaque équipe a une note qui monte après une victoire et baisse
               après une défaite, d&apos;autant plus que l&apos;adversaire était
-              fort et l&apos;écart large. Entre deux saisons, la note revient de
-              25 % vers la moyenne (1500). C&apos;est de loin la statistique la
-              plus utile au modèle.
+              fort et l&apos;écart large.
+              {elo && (
+                <>
+                  {" "}
+                  L&apos;équipe qui reçoit part avec un bonus de{" "}
+                  {int(elo.home_advantage)} points. Entre deux saisons, la note
+                  revient de {pct(elo.season_regression)} vers la moyenne
+                  (1500).
+                </>
+              )}{" "}
+              C&apos;est de loin la statistique la plus utile au modèle, et
+              elle sert aussi de référence («&nbsp;Elo seul&nbsp;»).
             </p>
           </div>
           <div>

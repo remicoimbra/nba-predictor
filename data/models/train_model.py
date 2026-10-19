@@ -1,9 +1,11 @@
 """
 train_model.py
 
-Entraîne et compare deux modèles sur game_features.csv :
+Entraîne et compare trois modèles sur game_features.csv :
 - Régression Logistique
 - XGBoost (le modèle servi par l'API)
+- Elo seul (référence sans apprentissage : la probabilité donnée par le
+  rating Elo d'avant-match, voir EloOnly)
 
 Évaluation walk-forward (voir evaluate_model.py) : chaque saison de 2021-22
 à 2025-26 est prédite par un modèle entraîné sur les seules saisons qui la
@@ -22,10 +24,12 @@ Usage :
 """
 
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
@@ -50,6 +54,9 @@ from evaluate_model import (
     summarize,
     walk_forward,
 )
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "preprocessing"))
+from features_lib import DEFAULT_ELO_PARAMS, elo_expected_home  # type: ignore[import-not-found]  # noqa: E402
 
 PROCESSED_DIR = Path(__file__).resolve().parent.parent / "processed"
 INPUT_PATH = PROCESSED_DIR / "game_features.csv"
@@ -145,11 +152,35 @@ def make_xgboost(seed: int) -> XGBClassifier:
     )
 
 
+class EloOnly:
+    """
+    « Modèle » Elo seul : la probabilité features_lib.elo_expected_home des
+    ratings d'avant-match (home_elo, away_elo), avec les paramètres Elo qui
+    ont servi à calculer game_features.csv. Rien à apprendre (fit ne fait
+    rien) : c'est la référence que XGBoost et la régression logistique, qui
+    reçoivent l'Elo parmi leurs features, doivent battre. Même probabilité
+    que elo_home_probability dans l'API.
+    """
+
+    def __init__(self, params=DEFAULT_ELO_PARAMS):
+        self.params = params
+
+    def fit(self, X, y):
+        return self
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        p = elo_expected_home(
+            X["home_elo"].to_numpy(dtype=float), X["away_elo"].to_numpy(dtype=float), self.params
+        )
+        return np.column_stack([1 - p, p])
+
+
 def model_specs() -> list[ModelSpec]:
-    """Modèles évalués (walk-forward, ancien découpage) puis entraînés pour l'API."""
+    """Modèles évalués (walk-forward, ancien découpage) ; XGBoost et la régression logistique sont ensuite entraînés pour l'API."""
     return [
         ModelSpec("xgboost", "XGBoost", make_xgboost, stochastic=True),
         ModelSpec("logreg", "Régression logistique", lambda seed: make_logreg()),
+        ModelSpec("elo", "Elo seul", lambda seed: EloOnly()),
     ]
 
 
@@ -184,10 +215,14 @@ def main():
     oof = walk_forward(df, feature_cols, specs)
     print()
     print_report(oof, keys)
-    comparisons = {m: paired_compare(oof, "xgboost", oof, "logreg", m) for m in ("log_loss", "brier", "accuracy")}
-    print("\nComparaison appariée, A = xgboost, B = logreg :")
-    for c in comparisons.values():
-        print("  " + format_comparison(c))
+    comparisons = {}
+    for other in ("logreg", "elo"):
+        comparisons[f"xgboost_vs_{other}"] = {
+            m: paired_compare(oof, "xgboost", oof, other, m) for m in ("log_loss", "brier", "accuracy")
+        }
+        print(f"\nComparaison appariée, A = xgboost, B = {other} :")
+        for c in comparisons[f"xgboost_vs_{other}"].values():
+            print("  " + format_comparison(c))
 
     print(f"\n=== Ancien découpage (test {LEGACY_TEST_SEASON}, matchs complets, graine {LEGACY_SEED}) ===")
     legacy = legacy_split(df, feature_cols, specs)
@@ -217,7 +252,7 @@ def main():
     # feature_importances (modèle servi) et evaluation.legacy.
     pooled = {k: summarize(oof, k) for k in keys}
     evaluation = evaluation_summary(oof, keys)
-    evaluation["comparisons"] = {"xgboost_vs_logreg": comparisons}
+    evaluation["comparisons"] = comparisons
     evaluation["legacy"] = legacy
     metrics = {
         "trained_at": datetime.now(timezone.utc).isoformat(),
@@ -227,7 +262,11 @@ def main():
         "baseline_accuracy": pooled["baseline"]["accuracy"],
         "baseline": pooled["baseline"],
         "served_model": SERVED_MODEL,
-        "models": [{"key": s.key, "name": s.name, **pooled[s.key]} for s in specs],
+        # Paramètres Elo de game_features.csv (ceux du code au moment de
+        # l'entraînement : check_features.py vérifie que le fichier est à
+        # jour). predictor_service.py les compare à ceux de team_state.json.
+        "elo_params": DEFAULT_ELO_PARAMS.as_dict(),
+        "models":[{"key": s.key, "name": s.name, **pooled[s.key]} for s in specs],
         "evaluation": evaluation,
         "feature_importances": {
             col: float(v) for col, v in sorted(
