@@ -4,6 +4,7 @@ import { motion } from "motion/react";
 import DataTable from "@/components/charts/DataTable";
 import { useChartTransition } from "@/lib/charts";
 import { int, num, pct, signed } from "@/lib/format";
+import { fillStyle } from "@/lib/teamColors";
 
 // Statistiques comparées. `domain` : bornes de l'échelle de la barre
 // (valeurs hors bornes écrêtées) ; `lowerIsBetter` pour les points encaissés.
@@ -48,7 +49,7 @@ function share(value, [min, max]) {
   return Math.min(Math.max((value - min) / (max - min), 0.02), 1);
 }
 
-export default function ComparisonBars({ home, away }) {
+export default function ComparisonBars({ home, away, colors }) {
   const transition = useChartTransition();
   const rows = METRICS.map((m) => {
     const valid = (v) => v != null && (!m.valid || m.valid(v));
@@ -65,10 +66,10 @@ export default function ComparisonBars({ home, away }) {
     <div>
       <div aria-hidden="true" className="mb-4 flex justify-between text-sm font-semibold">
         <span className="flex items-center gap-2">
-          <span className="h-3 w-3 rounded-sm bg-home" /> {home.tricode} · domicile
+          <span className="h-3 w-3 rounded-sm" style={fillStyle(colors.home)} /> {home.tricode} · domicile
         </span>
         <span className="flex items-center gap-2">
-          extérieur · {away.tricode} <span className="h-3 w-3 rounded-sm bg-away" />
+          extérieur · {away.tricode} <span className="h-3 w-3 rounded-sm" style={fillStyle(colors.away)} />
         </span>
       </div>
 
@@ -84,7 +85,8 @@ export default function ComparisonBars({ home, away }) {
               <div aria-hidden="true" className="flex h-3 justify-end rounded-l-full bg-surface-2">
                 {r.h != null && (
                   <motion.span
-                    className="rounded-l-full bg-home"
+                    className="rounded-l-full"
+                    style={fillStyle(colors.home)}
                     initial={{ width: 0 }}
                     whileInView={{ width: `${share(r.h, r.domain) * 100}%` }}
                     viewport={{ once: true, margin: "-40px" }}
@@ -95,7 +97,8 @@ export default function ComparisonBars({ home, away }) {
               <div aria-hidden="true" className="flex h-3 rounded-r-full bg-surface-2">
                 {r.a != null && (
                   <motion.span
-                    className="rounded-r-full bg-away"
+                    className="rounded-r-full"
+                    style={fillStyle(colors.away)}
                     initial={{ width: 0 }}
                     whileInView={{ width: `${share(r.a, r.domain) * 100}%` }}
                     viewport={{ once: true, margin: "-40px" }}

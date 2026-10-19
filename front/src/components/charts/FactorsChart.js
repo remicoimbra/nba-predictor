@@ -4,6 +4,7 @@ import { motion } from "motion/react";
 import DataTable from "@/components/charts/DataTable";
 import { useChartTransition } from "@/lib/charts";
 import { pct } from "@/lib/format";
+import { fillStyle } from "@/lib/teamColors";
 
 const sigmoid = (x) => 1 / (1 + Math.exp(-x));
 
@@ -34,7 +35,7 @@ const points = (impact) => `${impact >= 0 ? "+" : "−"}${Math.abs(impact * 100)
 
 // Barres divergentes : à gauche (bleu) ce qui favorise l'équipe à domicile,
 // à droite (rouge) ce qui favorise l'équipe à l'extérieur.
-export default function FactorsChart({ prediction, home, away }) {
+export default function FactorsChart({ prediction, home, away, colors }) {
   const transition = useChartTransition();
   const factors = factorImpacts(prediction);
   const max = Math.max(...factors.map((f) => Math.abs(f.impact)), 0.01);
@@ -43,10 +44,10 @@ export default function FactorsChart({ prediction, home, away }) {
     <div>
       <div aria-hidden="true" className="mb-3 grid grid-cols-2 gap-2 text-xs font-semibold text-text-2 sm:ml-48">
         <span className="flex items-center justify-end gap-1.5 text-right">
-          <span className="h-2.5 w-2.5 rounded-sm bg-home" /> favorise {home.tricode} (domicile)
+          <span className="h-2.5 w-2.5 rounded-sm" style={fillStyle(colors.home)} /> favorise {home.tricode} (domicile)
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-away" /> favorise {away.tricode} (extérieur)
+          <span className="h-2.5 w-2.5 rounded-sm" style={fillStyle(colors.away)} /> favorise {away.tricode} (extérieur)
         </span>
       </div>
 
@@ -72,7 +73,8 @@ export default function FactorsChart({ prediction, home, away }) {
                     <>
                       <span className="text-xs font-semibold tabular-nums">{points(f.impact)}</span>
                       <motion.span
-                        className="h-4 rounded-l-[4px] bg-home"
+                        className="h-4 rounded-l-[4px]"
+                        style={fillStyle(colors.home)}
                         initial={{ width: 0 }}
                         animate={{ width }}
                         transition={transition(0.1 + i * 0.06)}
@@ -84,7 +86,8 @@ export default function FactorsChart({ prediction, home, away }) {
                   {f.impact < 0 && (
                     <>
                       <motion.span
-                        className="h-4 rounded-r-[4px] bg-away"
+                        className="h-4 rounded-r-[4px]"
+                        style={fillStyle(colors.away)}
                         initial={{ width: 0 }}
                         animate={{ width }}
                         transition={transition(0.1 + i * 0.06)}
@@ -114,11 +117,11 @@ export default function FactorsChart({ prediction, home, away }) {
 }
 
 // Probabilité domicile du modèle comparée à celle de l'Elo seul.
-export function ModelVsElo({ prediction, home }) {
+export function ModelVsElo({ prediction, home, color }) {
   const transition = useChartTransition();
   const rows = [
-    { label: "Modèle", value: prediction.home_win_probability, cls: "bg-home" },
-    { label: "Elo seul", value: prediction.elo_home_probability, cls: "bg-line-strong" },
+    { label: "Modèle", value: prediction.home_win_probability, style: fillStyle(color) },
+    { label: "Elo seul", value: prediction.elo_home_probability, style: { backgroundColor: "var(--line-strong)" } },
   ];
   return (
     <div>
@@ -131,7 +134,8 @@ export function ModelVsElo({ prediction, home }) {
             <span className="text-text-2">{r.label}</span>
             <span aria-hidden="true" className="relative h-2.5 rounded-full bg-surface-2">
               <motion.span
-                className={`absolute inset-y-0 left-0 rounded-full ${r.cls}`}
+                className="absolute inset-y-0 left-0 rounded-full"
+                style={r.style}
                 initial={{ width: 0 }}
                 animate={{ width: `${r.value * 100}%` }}
                 transition={transition(0.2 + i * 0.1)}

@@ -3,7 +3,7 @@
 import { motion } from "motion/react";
 import { pct } from "@/lib/format";
 import { useChartTransition } from "@/lib/charts";
-import { lowContrastEdge, matchupColors } from "@/lib/teamColors";
+import { fillStyle, matchupColors } from "@/lib/teamColors";
 
 // Barre de probabilité de victoire domicile (à gauche) / extérieur (à
 // droite), aux couleurs des équipes, séparées par un espace de 2px,
@@ -19,14 +19,7 @@ export default function ProbabilityBar({
   const awayProbability = 1 - homeProbability;
   const height = size === "lg" ? "h-3.5" : "h-2.5";
   const colors = matchupColors(home, away);
-  const segmentStyle = (color) => {
-    const edge = lowContrastEdge(color);
-    return {
-      flexBasis: 0,
-      backgroundColor: color,
-      boxShadow: edge ? `inset 0 0 0 1px ${edge}` : undefined,
-    };
-  };
+  const segmentStyle = (color) => ({ flexBasis: 0, ...fillStyle(color) });
 
   return (
     <div>

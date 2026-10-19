@@ -6,6 +6,7 @@ import DataTable from "@/components/charts/DataTable";
 import Tooltip from "@/components/charts/Tooltip";
 import { niceTicks, scaleLinear, useChartTransition, useWidth } from "@/lib/charts";
 import { int, parseISODate, shortDate, toISODate } from "@/lib/format";
+import { fillStyle, lowContrastEdge } from "@/lib/teamColors";
 
 const HEIGHT = 260;
 const M = { top: 16, right: 76, bottom: 28, left: 44 };
@@ -25,15 +26,17 @@ function valueAt(series, t) {
 
 // Évolution du rating Elo des deux équipes (après chaque match), sur un axe
 // de temps commun. Ligne de référence : moyenne de la ligue (1500).
-export default function EloLine({ home, away }) {
+export default function EloLine({ home, away, colors }) {
   const [ref, width] = useWidth();
   const [hoverT, setHoverT] = useState(null);
   const transition = useChartTransition();
 
   const series = [
-    { team: home, color: "var(--home)", points: home.elo_history ?? [] },
-    { team: away, color: "var(--away)", points: away.elo_history ?? [] },
-  ].filter((s) => s.points.length > 0);
+    { team: home, color: colors.home, points: home.elo_history ?? [] },
+    { team: away, color: colors.away, points: away.elo_history ?? [] },
+  ]
+    .map((s) => ({ ...s, edge: lowContrastEdge(s.color) }))
+    .filter((s) => s.points.length > 0);
 
   if (series.length === 0) {
     return (
@@ -79,7 +82,7 @@ export default function EloLine({ home, away }) {
                 const p = valueAt(s.points, hoverT);
                 return (
                   <p key={s.team.id} className="flex items-center gap-1.5">
-                    <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: s.color }} />
+                    <span aria-hidden="true" className="h-2 w-2 rounded-full" style={fillStyle(s.color)} />
                     {s.team.tricode} : {p ? int(p.elo) : "—"}
                   </p>
                 );
@@ -94,7 +97,7 @@ export default function EloLine({ home, away }) {
       <div aria-hidden="true" className="mb-2 flex flex-wrap gap-4 text-sm font-semibold">
         {series.map((s) => (
           <span key={s.team.id} className="flex items-center gap-2">
-            <span className="h-0.5 w-5 rounded-full" style={{ background: s.color, height: 3 }} />
+            <span className="h-0.5 w-5 rounded-full" style={{ ...fillStyle(s.color), height: 3 }} />
             {s.team.name}
           </span>
         ))}
@@ -144,24 +147,44 @@ export default function EloLine({ home, away }) {
             ))}
 
             {series.map((s, i) => (
-              <motion.path
-                key={s.team.id}
-                d={path(s.points)}
-                fill="none"
-                stroke={s.color}
-                strokeWidth="2"
-                strokeLinejoin="round"
-                strokeLinecap="round"
-                initial={{ pathLength: 0 }}
-                whileInView={{ pathLength: 1 }}
-                viewport={{ once: true }}
-                transition={transition(i * 0.15, 1.2)}
-              />
+              <g key={s.team.id}>
+                {/* liseré sous la courbe si la couleur se confond avec le fond */}
+                {s.edge &&
+                  [4.5, 2].map((w, j) => (
+                    <motion.path
+                      key={w}
+                      d={path(s.points)}
+                      fill="none"
+                      style={{ stroke: j === 0 ? s.edge : s.color }}
+                      strokeWidth={w}
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                      initial={{ pathLength: 0 }}
+                      whileInView={{ pathLength: 1 }}
+                      viewport={{ once: true }}
+                      transition={transition(i * 0.15, 1.2)}
+                    />
+                  ))}
+                {!s.edge && (
+                  <motion.path
+                    d={path(s.points)}
+                    fill="none"
+                    stroke={s.color}
+                    strokeWidth="2"
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                    initial={{ pathLength: 0 }}
+                    whileInView={{ pathLength: 1 }}
+                    viewport={{ once: true }}
+                    transition={transition(i * 0.15, 1.2)}
+                  />
+                )}
+              </g>
             ))}
 
             {ends.map((s) => (
               <g key={s.team.id}>
-                <circle cx={x(time(s.last.date))} cy={y(s.last.elo)} r="5" fill={s.color} stroke="var(--bg)" strokeWidth="2" />
+                <circle cx={x(time(s.last.date))} cy={y(s.last.elo)} r="5" fill={s.color} style={{ stroke: s.edge ?? "var(--bg)" }} strokeWidth="2" />
                 {endLabels && (
                   <text x={x(time(s.last.date)) + 10} y={y(s.last.elo)} dy="0.32em" className="fill-text text-xs font-semibold">
                     {s.team.tricode} {int(s.last.elo)}
@@ -176,7 +199,7 @@ export default function EloLine({ home, away }) {
                 {series.map((s) => {
                   const p = valueAt(s.points, hoverT);
                   return p ? (
-                    <circle key={s.team.id} cx={x(time(p.date))} cy={y(p.elo)} r="4.5" fill={s.color} stroke="var(--bg)" strokeWidth="2" />
+                    <circle key={s.team.id} cx={x(time(p.date))} cy={y(p.elo)} r="4.5" fill={s.color} style={{ stroke: s.edge ?? "var(--bg)" }} strokeWidth="2" />
                   ) : null;
                 })}
               </g>

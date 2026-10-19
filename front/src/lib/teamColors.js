@@ -76,6 +76,16 @@ export function lowContrastEdge(color) {
   return light === dark && light === "transparent" ? null : `light-dark(${light}, ${dark})`;
 }
 
+// Style d'un aplat (barre, pastille de légende) aux couleurs d'une équipe,
+// avec le liseré de `lowContrastEdge` si besoin.
+export function fillStyle(color) {
+  const edge = lowContrastEdge(color);
+  return {
+    backgroundColor: color,
+    boxShadow: edge ? `inset 0 0 0 1px ${edge}` : undefined,
+  };
+}
+
 function linear(hex) {
   return [1, 3, 5].map((i) => {
     const c = parseInt(hex.slice(i, i + 2), 16) / 255;

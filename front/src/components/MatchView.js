@@ -13,6 +13,7 @@ import { EmptyState, ErrorState, Loading } from "@/components/States";
 import { FormPills, PreseasonBadge, TeamBadge } from "@/components/TeamBits";
 import { EASE_OUT } from "@/lib/charts";
 import { int, localTime, longDate, num, record } from "@/lib/format";
+import { fillStyle, matchupColors } from "@/lib/teamColors";
 import { useApi } from "@/lib/useApi";
 import { getGame } from "@/services/api";
 
@@ -94,6 +95,7 @@ function MatchDetail({ game }) {
   const hasStats = Boolean(home.stats && away.stats);
   const favoriteSide = prediction?.predicted_winner;
   const favorite = favoriteSide === "home" ? home : away;
+  const colors = matchupColors(home, away);
   // Date passée interrogée avec l'état ACTUEL des équipes (team_state.json
   // n'est pas historisé) : des matchs « récents » peuvent être postérieurs.
   const pastDate = [home, away].some((t) =>
@@ -114,8 +116,8 @@ function MatchDetail({ game }) {
         className="relative overflow-hidden rounded-3xl border border-line bg-surface p-6 sm:p-8"
       >
         <div aria-hidden="true" className="absolute inset-x-0 top-0 flex h-1.5">
-          <span className="flex-1 bg-home" />
-          <span className="flex-1 bg-away" />
+          <span className="flex-1" style={fillStyle(colors.home)} />
+          <span className="flex-1" style={fillStyle(colors.away)} />
         </div>
         <div className="mb-6 flex flex-wrap items-center justify-center gap-2 text-sm text-text-2">
           <span className="first-letter:uppercase">{longDate(game.date)}</span>
@@ -135,7 +137,7 @@ function MatchDetail({ game }) {
                     prediction.away_win_probability,
                   )}
                   team={favorite}
-                  side={favoriteSide}
+                  color={favoriteSide === "home" ? colors.home : colors.away}
                 />
                 <p className="mt-3 text-center text-sm text-text-2">
                   Score estimé
@@ -158,7 +160,7 @@ function MatchDetail({ game }) {
 
         {prediction && (
           <div className="mx-auto mt-8 max-w-md">
-            <ModelVsElo prediction={prediction} home={home} />
+            <ModelVsElo prediction={prediction} home={home} color={colors.home} />
           </div>
         )}
       </motion.div>
@@ -168,7 +170,7 @@ function MatchDetail({ game }) {
           title="Pourquoi cette prédiction ?"
           subtitle="Poids de chaque famille de statistiques dans la décision du modèle, en points de probabilité, par rapport à un match moyen."
         >
-          <FactorsChart prediction={prediction} home={home} away={away} />
+          <FactorsChart prediction={prediction} home={home} away={away} colors={colors} />
         </Section>
       )}
 
@@ -178,7 +180,7 @@ function MatchDetail({ game }) {
           subtitle="Les statistiques utilisées par le modèle, côte à côte."
           index={1}
         >
-          <ComparisonBars home={home} away={away} />
+          <ComparisonBars home={home} away={away} colors={colors} />
         </Section>
       )}
 
@@ -191,8 +193,8 @@ function MatchDetail({ game }) {
             index={2}
           >
             <div className="grid gap-6 md:grid-cols-2">
-              <AbsentList team={home} side="home" />
-              <AbsentList team={away} side="away" />
+              <AbsentList team={home} color={colors.home} />
+              <AbsentList team={away} color={colors.away} />
             </div>
           </Section>
         )}
@@ -204,8 +206,8 @@ function MatchDetail({ game }) {
           index={3}
         >
           <div className="grid gap-8 md:grid-cols-2">
-            <FormChart team={home} side="home" />
-            <FormChart team={away} side="away" />
+            <FormChart team={home} color={colors.home} />
+            <FormChart team={away} color={colors.away} />
           </div>
         </Section>
       )}
@@ -216,7 +218,7 @@ function MatchDetail({ game }) {
           subtitle="Rating après chaque match. Plus il est haut, plus l'équipe est forte."
           index={4}
         >
-          <EloLine home={home} away={away} />
+          <EloLine home={home} away={away} colors={colors} />
         </Section>
       )}
 
@@ -258,14 +260,15 @@ function MatchDetail({ game }) {
   );
 }
 
-function AbsentList({ team, side }) {
+function AbsentList({ team, color }) {
   const players = team.absent_players ?? [];
   return (
     <div>
       <p className="mb-3 flex items-center gap-2 text-sm font-semibold">
         <span
           aria-hidden="true"
-          className={`h-3 w-3 rounded-sm ${side === "home" ? "bg-home" : "bg-away"}`}
+          className="h-3 w-3 rounded-sm"
+          style={fillStyle(color)}
         />
         {team.name}
       </p>

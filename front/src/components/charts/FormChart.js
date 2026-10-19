@@ -6,18 +6,19 @@ import DataTable from "@/components/charts/DataTable";
 import Tooltip from "@/components/charts/Tooltip";
 import { niceTicks, scaleLinear, useChartTransition, useWidth } from "@/lib/charts";
 import { shortDate, signed } from "@/lib/format";
+import { fillStyle, lowContrastEdge } from "@/lib/teamColors";
 
 const HEIGHT = 190;
 const M = { top: 12, right: 8, bottom: 42, left: 34 };
 
 // Écart de points des derniers matchs d'une équipe : colonne vers le haut
 // = victoire, vers le bas = défaite (V/D écrit sous chaque colonne).
-export default function FormChart({ team, side }) {
+export default function FormChart({ team, color }) {
   const [ref, width] = useWidth();
   const [hover, setHover] = useState(null);
   const transition = useChartTransition();
   const games = team.recent_games ?? [];
-  const color = side === "home" ? "var(--home)" : "var(--away)";
+  const edge = lowContrastEdge(color);
 
   const margins = games.map((g) => g.pts_scored - g.pts_allowed);
   const extent = Math.max(10, ...margins.map(Math.abs));
@@ -37,7 +38,7 @@ export default function FormChart({ team, side }) {
   return (
     <figure>
       <figcaption className="mb-2 flex items-center gap-2 font-semibold">
-        <span aria-hidden="true" className="h-3 w-3 rounded-sm" style={{ background: color }} />
+        <span aria-hidden="true" className="h-3 w-3 rounded-sm" style={fillStyle(color)} />
         {team.name}
         <span className="ml-auto text-sm font-normal text-text-2">
           {wins}V – {games.length - wins}D
@@ -96,7 +97,7 @@ export default function FormChart({ team, side }) {
                   <motion.path
                     d={path}
                     fill={color}
-                    style={{ originY: v >= 0 ? 1 : 0 }}
+                    style={{ originY: v >= 0 ? 1 : 0, ...(edge && { stroke: edge, strokeWidth: 1 }) }}
                     initial={{ scaleY: 0 }}
                     whileInView={{ scaleY: 1 }}
                     viewport={{ once: true }}
