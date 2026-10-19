@@ -26,10 +26,11 @@ export default function ModelView() {
           Le modèle
         </h1>
         <p className="mt-3 text-text-2">
-          Un classifieur XGBoost prédit si l&apos;équipe à domicile gagne, à
-          partir de statistiques calculées avant chaque match. Il est comparé à
-          une régression logistique, au rating Elo seul et à la règle naïve
-          «&nbsp;le domicile gagne toujours&nbsp;».
+          Une régression logistique prédit si l&apos;équipe à domicile gagne, à
+          partir des écarts entre les deux équipes (Elo, forme, repos…)
+          calculés avant chaque match. Elle a été préférée à XGBoost, dont les
+          probabilités sont moins fiables, et elle est comparée au rating Elo
+          seul et à la règle naïve «&nbsp;le domicile gagne toujours&nbsp;».
         </p>
       </header>
 
@@ -142,7 +143,7 @@ function ModelDetail({ m }) {
 
       <Card
         title="Ce qui compte le plus"
-        subtitle="Importance des 10 premières statistiques dans XGBoost (part du gain total). « Écart » = domicile moins extérieur."
+        subtitle="Poids moyen de chaque famille de statistiques dans les prédictions (part du total). « Forme récente » réunit le bilan et le Net Rating des derniers matchs."
       >
         <ImportanceBars metrics={m} />
       </Card>

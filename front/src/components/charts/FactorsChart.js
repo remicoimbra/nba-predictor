@@ -10,8 +10,9 @@ const sigmoid = (x) => 1 / (1 + Math.exp(-x));
 /**
  * Impact d'un facteur en points de probabilité : proba du modèle, moins la
  * proba qu'il donnerait sans ce facteur. Les contributions de l'API sont en
- * log-odds (valeurs de type SHAP d'XGBoost, additives avant la sigmoïde) :
- * cette conversion rend l'ordre de grandeur lisible (« +12 pts »).
+ * log-odds (contributions exactes de la régression logistique, additives
+ * avant la sigmoïde) : cette conversion rend l'ordre de grandeur lisible
+ * (« +12 pts »).
  */
 export function factorImpacts(prediction) {
   const total = prediction.base_value + prediction.factors.reduce((s, f) => s + f.contribution, 0);
@@ -116,7 +117,7 @@ export default function FactorsChart({ prediction, home, away }) {
 export function ModelVsElo({ prediction, home }) {
   const transition = useChartTransition();
   const rows = [
-    { label: "Modèle XGBoost", value: prediction.home_win_probability, cls: "bg-home" },
+    { label: "Modèle", value: prediction.home_win_probability, cls: "bg-home" },
     { label: "Elo seul", value: prediction.elo_home_probability, cls: "bg-line-strong" },
   ];
   return (

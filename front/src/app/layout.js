@@ -17,7 +17,7 @@ const barlow = Barlow_Condensed({
 
 export const metadata = {
   title: "NBA Predictor",
-  description: "Prédictions de matchs NBA (XGBoost + Elo)",
+  description: "Prédictions de matchs NBA (régression logistique + Elo)",
 };
 
 // Applique le thème choisi AVANT le premier rendu (pas de flash clair ->
@@ -43,7 +43,7 @@ export default function RootLayout({ children }) {
             {children}
           </main>
           <footer className="border-t border-line py-6 text-center text-sm text-text-2">
-            Projet portfolio · modèle XGBoost entraîné sur 7 saisons NBA · prédictions indicatives
+            Projet portfolio · modèle entraîné sur 7 saisons NBA · prédictions indicatives
           </footer>
         </Providers>
       </body>

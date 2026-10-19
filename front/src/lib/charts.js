@@ -52,26 +52,3 @@ export function niceTicks(min, max, count = 4) {
   for (let v = start; v <= max + step / 2; v += step) ticks.push(Math.round(v * 1e6) / 1e6);
   return ticks;
 }
-
-// Libellés français des colonnes de features du modèle (page « Le modèle »).
-const FEATURE_BASE_LABELS = {
-  elo: "Rating Elo",
-  win_pct: "% victoires saison",
-  win_pct_context: "% victoires dom./ext.",
-  win_pct_last10: "% victoires 10 derniers",
-  rest_days: "Jours de repos",
-  avg_pts_scored_last5: "Points marqués (5)",
-  avg_pts_scored_last10: "Points marqués (10)",
-  avg_pts_allowed_last5: "Points encaissés (5)",
-  avg_pts_allowed_last10: "Points encaissés (10)",
-  net_rtg_last5: "Net Rating (5)",
-  net_rtg_last10: "Net Rating (10)",
-};
-const SIDE_LABELS = { home: "Domicile", away: "Extérieur", diff: "Écart" };
-
-export function featureLabel(column) {
-  const [side, ...rest] = column.split("_");
-  const base = rest.join("_");
-  const label = FEATURE_BASE_LABELS[base] ?? base;
-  return SIDE_LABELS[side] ? `${label} · ${SIDE_LABELS[side]}` : column;
-}

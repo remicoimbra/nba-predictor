@@ -4,7 +4,7 @@ import { motion } from "motion/react";
 import { useState } from "react";
 import DataTable from "@/components/charts/DataTable";
 import Tooltip from "@/components/charts/Tooltip";
-import { featureLabel, scaleLinear, useChartTransition, useWidth } from "@/lib/charts";
+import { scaleLinear, useChartTransition, useWidth } from "@/lib/charts";
 import { dec, int, pct, pct1 } from "@/lib/format";
 
 // Barres horizontales à une seule série. `highlight` : la barre mise en
@@ -109,17 +109,19 @@ export function SeasonTable({ metrics }) {
   );
 }
 
-// Importance des features (gain XGBoost normalisé), 10 premières.
-export function ImportanceBars({ metrics, top = 10 }) {
-  const entries = Object.entries(metrics.feature_importances).slice(0, top);
-  const items = entries.map(([col, v], i) => ({ label: featureLabel(col), value: v, highlight: i === 0 }));
+// Poids de chaque famille de statistiques dans les prédictions du modèle
+// servi (part de la contribution moyenne, mêmes familles que les facteurs
+// de la fiche match), triées par l'API.
+export function ImportanceBars({ metrics }) {
+  const families = metrics.factor_importances;
+  const items = families.map((f, i) => ({ label: f.label, value: f.share, highlight: i === 0 }));
   return (
     <HBars
       items={items}
-      max={entries[0]?.[1] || 1}
+      max={families[0]?.share || 1}
       format={pct1}
-      caption="Importance des features dans XGBoost"
-      columns={["Feature", "Importance"]}
+      caption="Poids de chaque famille de statistiques dans les prédictions"
+      columns={["Famille", "Poids"]}
     />
   );
 }

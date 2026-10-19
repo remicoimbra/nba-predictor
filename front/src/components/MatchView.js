@@ -166,7 +166,7 @@ function MatchDetail({ game }) {
       {prediction && (
         <Section
           title="Pourquoi cette prédiction ?"
-          subtitle="Poids de chaque famille de statistiques dans la décision du modèle, en points de probabilité (contributions XGBoost de type SHAP)."
+          subtitle="Poids de chaque famille de statistiques dans la décision du modèle, en points de probabilité, par rapport à un match moyen."
         >
           <FactorsChart prediction={prediction} home={home} away={away} />
         </Section>
@@ -221,7 +221,8 @@ function MatchDetail({ game }) {
           {(home.new_season || away.new_season) && (
             <li>
               Nouvelle saison : les bilans repartent de zéro et l&apos;Elo est
-              ramené de 25 % vers la moyenne (1500).
+              en partie ramené vers la moyenne (1500), comme expliqué sur la
+              page «&nbsp;Le modèle&nbsp;».
             </li>
           )}
           {pastDate && (
