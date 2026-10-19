@@ -24,6 +24,7 @@ Il n'y a pas de base de données : des fichiers CSV et JSON font office de stock
 | Étape | Script | Entrée → sortie |
 | --- | --- | --- |
 | Collecte | `collectors/fetch_games.py` | `nba_api` → `raw/games_raw_all_seasons.csv` (1 ligne par équipe) puis `raw/games_history.csv` (1 ligne par match) |
+| Feuilles de match joueur | `collectors/fetch_player_logs.py` | `nba_api` (`LeagueGameLog`, une requête par saison) → `raw/player_games_raw.csv` (1 ligne par joueur entré en jeu et par match) |
 | Nettoyage | `preprocessing/clean_data.py` | → `processed/games_clean.csv` (typage strict, cible `home_win`, tri chronologique) |
 | Features | `preprocessing/feature_engineering.py` | → `processed/game_features.csv` |
 | Entraînement | `models/train_model.py` | → `saved_models/*.pkl`, `feature_columns.json`, `model_metrics.json` (dont le paramètre du score estimé, calculé par `models/score_model.py`) |
@@ -42,9 +43,10 @@ Pour chaque équipe, calculées **avant** le match :
 - **Points marqués et encaissés** : moyennes sur 5 et 10 matchs.
 - **Net Rating estimé** : (points marqués − encaissés) rapportés aux possessions estimées à partir du boxscore.
 - **Jours de repos**, plafonnés à 7.
+- **Effectif** (`lineup_delta`) : force des joueurs du dernier match moins la force habituelle de l'équipe (voir « Les absences »).
 - **Différences** domicile − extérieur de chacune, généralement plus discriminantes qu'une paire de colonnes séparées.
 
-Le modèle n'utilise que les différences et l'Elo de chaque équipe (11 variables, voir « Choisir le modèle »). Les autres colonnes restent calculées : la fiche match les affiche.
+Le modèle n'utilise que les différences et l'Elo de chaque équipe (12 variables, voir « Choisir le modèle » et « Les absences »). Les autres colonnes restent calculées : la fiche match les affiche.
 
 ### Éviter la fuite temporelle
 
@@ -53,7 +55,7 @@ Une feature qui utilise une information connue seulement après le match donne u
 1. Chaque statistique glissante est décalée d'un match (`shift(1)`), et l'Elo enregistré est celui d'**avant** le match.
 2. Chaque saison testée est prédite par un modèle entraîné uniquement sur les saisons qui la précèdent : pas de découpage aléatoire (voir « Évaluer honnêtement »).
 3. `game_features.csv` contient aussi le boxscore brut du match joué (`home_fga`, `away_oreb`…), connu seulement après coup. `train_model.py` choisit ses colonnes par **liste blanche de motifs** (`FEATURE_PATTERNS`) et jamais par liste noire : une nouvelle colonne ne devient pas une feature par accident.
-4. `check_features.py` le vérifie automatiquement : il inverse le résultat de quelques matchs et recalcule toutes les features. Celles du match et des matchs antérieurs ne doivent pas bouger, celles des matchs suivants si. Le même script contrôle que l'API calcule exactement les mêmes features que l'entraînement (50 matchs, `team_state.json` reconstruit avec les seuls matchs antérieurs, écart toléré 1e-9), et que l'explication renvoyée pour ces matchs redonne bien la probabilité.
+4. `check_features.py` le vérifie automatiquement : il inverse le résultat de quelques matchs et recalcule toutes les features. Celles du match et des matchs antérieurs ne doivent pas bouger, celles des matchs suivants si. Le même script contrôle que l'API calcule exactement les mêmes features que l'entraînement (50 matchs, `team_state.json` reconstruit avec les seuls matchs antérieurs, écart toléré 1e-9), et que l'explication renvoyée pour ces matchs redonne bien la probabilité. Pour l'effectif, un contrôle à part retire le meilleur joueur de la feuille de quelques matchs : rien ne doit changer avant ni pendant ces matchs, l'effectif du match suivant si.
 
 ### Évaluer honnêtement
 
@@ -66,11 +68,11 @@ Deux variantes se comparent sur les **mêmes matchs** : on calcule l'écart de l
 | Modèle | Précision | Log loss | Brier |
 | --- | --- | --- | --- |
 | Règle naïve (taux de victoire à domicile) | 55,3 % | 0,688 | 0,247 |
-| **Régression logistique (servie par l'API)** | 65,7 % | 0,616 | 0,214 |
-| XGBoost | 65,6 % | 0,620 | 0,215 |
+| **Régression logistique (servie par l'API)** | 66,1 % | 0,614 | 0,213 |
+| XGBoost | 65,7 % | 0,618 | 0,215 |
 | Elo seul (sans apprentissage) | 65,9 % | 0,618 | 0,215 |
 
-(État du 2026-10-19 après le réglage de l'Elo, le choix du modèle et l'extension de l'historique. Au départ, avec 31 variables et l'Elo d'origine : XGBoost 0,635, régression logistique 0,620, Elo seul 0,632.)
+(État du 2026-10-19 après le réglage de l'Elo, le choix du modèle, l'extension de l'historique et l'indicateur d'effectif. Au départ, avec 31 variables et l'Elo d'origine : XGBoost 0,635, régression logistique 0,620, Elo seul 0,632.)
 
 Ce que ça a montré :
 - La précision varie de 63 % (2022-23) à 69 % (2025-26) d'une saison à l'autre. Le 69 % mesuré sur la seule saison 2025-26 surestimait ce qu'on peut attendre en moyenne.
@@ -121,13 +123,34 @@ La raison se lit dans les données : on gagnait plus souvent à domicile en 2016
 
 Seule la combinaison des deux passe la règle. Le gain est petit, mais le biais domicile retombe à +0,6 point et l'erreur de calibration de 0,015 à 0,014. XGBoost profite aussi des poids (−0,0019, −0,0034 à −0,0005, 5 saisons sur 5) alors que l'historique seul lui coûtait 0,5 point de précision. Sur les 107 premiers matchs de 2026-27, les probabilités servies bougent peu : 1,3 point en moyenne, 3,3 au plus.
 
+### Les absences
+
+Les blessures ne sont connues avec certitude qu'une demi-heure avant le match, et la synchro tourne à 10 h. On ne peut donc s'appuyer que sur les matchs déjà joués : **un joueur absent du dernier match de son équipe est supposé encore absent**. Les feuilles de match par joueur (`LeagueGameLog`) ne listent que les joueurs entrés en jeu, ce qui suffit à repérer les absents.
+
+- Valeur d'un joueur : son Game Score moyen (formule de Hollinger : points, tirs, rebonds, passes, interceptions, contres, fautes, balles perdues) sur ses 15 dernières apparitions avant le match, toutes équipes et saisons confondues.
+- Force d'un effectif : la somme des 8 meilleures valeurs parmi les joueurs entrés en jeu. Le top 8 évite qu'un match plié, où entrent les remplaçants de fin de banc, gonfle le total.
+- `lineup_delta` : force de l'effectif du dernier match moins la force moyenne des 10 derniers matchs de la saison, toutes évaluées avec les valeurs des joueurs à la date du match. Très négatif quand des titulaires manquaient au dernier match, ce que l'Elo et la forme, calculés sur l'effectif habituel, ne voient pas encore. 0 au premier match de la saison.
+
+Essai mené comme les précédents (variantes fixées à l'avance, choisies sur 2021-22 à 2023-24, confirmées ensuite) :
+
+| Variante (régression logistique) | Écart de log loss (intervalle à 95 %) |
+| --- | --- |
+| **`lineup_delta`, Game Score (retenu)** | **−0,0023 (−0,0040 à −0,0006)**, Brier −0,0011, 4 saisons sur 5 ; 2024-25 + 2025-26 : −0,0025 (−0,0050 à −0,0002) |
+| Même calcul en minutes jouées | −0,0019 sur les saisons de réglage (dans le bruit) |
+| Titulaires habituels absents du dernier match | −0,0026, équivalent ; une seule variable gardée |
+| « Oracle » : joueurs réellement entrés en jeu (impossible à 10 h) | −0,0082 (−0,0117 à −0,0049) : borne haute de ce que donnerait l'effectif exact |
+
+Le gain se concentre sur le tiers des matchs où l'effectif a vraiment changé (−0,0075), et il est le même en début, milieu et fin de saison : ce ne sont pas seulement les mises au repos d'avril. XGBoost en profite aussi (−0,0015, 5 saisons sur 5). Avec cette variable, la régression logistique bat pour la première fois l'Elo seul de façon nette (−0,0042, −0,0070 à −0,0015, 5 saisons sur 5). Limite : un joueur qui revient de blessure reste compté absent jusqu'à son premier match. Le rapport officiel des blessures (PDF mis à jour jusqu'au soir du match) n'est pas exploitable de façon fiable à 10 h.
+
+`team_state.json` contient pour chaque équipe la force de ses 10 derniers effectifs (valeurs des joueurs à ce jour) et la liste des joueurs habituels absents du dernier match, affichée sur la fiche match.
+
 ### Expliquer une prédiction
 
 L'explication d'une prédiction reste exacte. Pour un modèle linéaire, la contribution d'une variable est son coefficient multiplié par sa valeur standardisée (0 = valeur moyenne de l'entraînement), en log-odds ; le biais plus la somme des contributions redonne la probabilité. Le bilan des 10 derniers matchs et le Net Rating récent forment une seule famille, « Forme récente » : corrélés à 0,88, ils se partagent le même effet de façon instable (le coefficient du bilan récent passe de +0,04 à −0,13 selon les saisons d'entraînement). Séparés, ils donneraient des facteurs de signes opposés difficiles à lire.
 
 ### `features_lib.py` : une seule définition des formules
 
-L'entraînement calcule les features sur tout l'historique (vectorisé, pandas). L'API les calcule pour un seul match futur à partir de `team_state.json`. Si les deux codes divergeaient, le modèle tournerait sans erreur mais avec de moins bonnes prédictions, sans qu'on le voie. `features_lib.py` contient donc les constantes (fenêtres, paramètres Elo `DEFAULT_ELO_PARAMS`, plafond de repos) et les fonctions pures utilisées des deux côtés. La non-régression a été vérifiée : l'ancienne et la nouvelle implémentation de l'Elo donnent un écart de 0,0 sur les 8 279 matchs de l'époque. Les formules du score estimé y sont aussi, et `check_features.py` vérifie que l'API sert exactement le score qu'elles donnent sur les features d'entraînement.
+L'entraînement calcule les features sur tout l'historique (vectorisé, pandas). L'API les calcule pour un seul match futur à partir de `team_state.json`. Si les deux codes divergeaient, le modèle tournerait sans erreur mais avec de moins bonnes prédictions, sans qu'on le voie. `features_lib.py` contient donc les constantes (fenêtres, paramètres Elo `DEFAULT_ELO_PARAMS`, plafond de repos, calcul de l'effectif) et les fonctions pures utilisées des deux côtés. La non-régression a été vérifiée : l'ancienne et la nouvelle implémentation de l'Elo donnent un écart de 0,0 sur les 8 279 matchs de l'époque. Les formules du score estimé y sont aussi, et `check_features.py` vérifie que l'API sert exactement le score qu'elles donnent sur les features d'entraînement.
 
 ### Cas particuliers gérés à la prédiction
 
@@ -184,7 +207,7 @@ Next.js (App Router), JavaScript, Tailwind CSS v4 (configuration dans `globals.c
 
 ```
 PC (tâche planifiée Windows, 1 fois par jour)
-  infra/sync_to_vps.ps1 : fetch_games --refresh → clean_data → team_state → fetch_schedule
+  infra/sync_to_vps.ps1 : fetch_games --refresh → fetch_player_logs --refresh → clean_data → team_state → fetch_schedule
         │  scp vers un fichier .tmp puis mv atomique (SSH par clé)
         ▼
 Serveur : data/processed/team_state.json + schedule.json
@@ -213,8 +236,9 @@ Si les fichiers deviennent insuffisants : PostgreSQL local (conteneur Docker). T
 | Entraînement sur les matchs complets | Garder les matchs incomplets n'aidait pas (écart dans le bruit) et dégradait la régression logistique sur ces matchs |
 | Paramètres Elo réglés sur l'Elo seul | Objectif propre à l'Elo (pas au modèle complet), réglage sur 2020-21 à 2023-24, confirmation sur 2 saisons jamais vues : avantage du terrain 100 → 40, régression 25 % → 50 % |
 | Régression logistique servie plutôt que XGBoost | Meilleure log loss en walk-forward (écart significatif, même sens sur les 5 saisons) et explication exacte de chaque prédiction |
-| 11 variables seulement (écarts + Elo) | Les 20 autres colonnes n'aidaient aucun modèle et gênaient la régression logistique ; elles restent affichées sur la fiche match |
+| 12 variables seulement (écarts + Elo) | Les autres colonnes n'aidaient aucun modèle et gênaient la régression logistique ; elles restent affichées sur la fiche match |
 | Historique depuis 2016-17, saisons pondérées (demi-vie 2) | Plus de données, sans que l'avantage du terrain plus fort de 2016-19 ne biaise le modèle ; ni l'un ni l'autre ne suffisait seul |
 | Écart du score déduit de la probabilité | Erreur plus faible que l'ancienne méthode, et le score ne contredit jamais le favori ; la régression du total n'apportait rien |
 | Pas de variables de fatigue ni de déplacement | Matchs des 4 derniers jours, distance parcourue et décalage horaire essayés (2026-10-19) : aucun gain qui tienne sur les saisons non utilisées pour le réglage ; les jours de repos captent déjà les back-to-back |
-| Piste restante (plan du 2026-10-19) | Joueurs absents |
+| Absences déduites du dernier match joué | Seule information disponible à 10 h ; −0,0023 de log loss, confirmé sur les saisons non utilisées pour le réglage. Le rapport officiel des blessures n'est pas utilisé |
+| Matchs sur terrain neutre (Paris, Mexico, Las Vegas…) | Absents de l'historique : `LeagueGameFinder` les marque « @ » pour les deux équipes, `fetch_games.py` ne sait pas qui reçoit (10 matchs depuis 2024-25). Piste : les rattacher avec un domicile conventionnel |
