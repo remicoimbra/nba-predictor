@@ -40,11 +40,12 @@ nba-predictor/
 │   │   ├── clean_data.py           # FAIT
 │   │   ├── feature_engineering.py  # FAIT — v3 (Pace/Net Rating, win_pct contexte, Elo), refactoré cette session
 │   │   ├── features_lib.py         # FAIT (nouveau, cette session) — logique Elo/rolling stats PARTAGÉE entre feature_engineering.py (batch) et predictor_service.py (live)
-│   │   └── team_state.py           # FAIT — construit team_state.json (état courant par équipe) ; + opponent_id/elo_before par match récent et elo_history (30 pts) depuis la refonte UI
+│   │   ├── team_state.py           # FAIT — construit team_state.json (état courant par équipe) ; + opponent_id/elo_before par match récent et elo_history (30 pts) depuis la refonte UI
+│   │   └── check_features.py       # FAIT (2026-10-19) — contrôles : game_features.csv à jour, cohérence entraînement/API, absence de fuite (voir "Amélioration des prédictions")
 │   ├── models/
-│   │   ├── train_model.py          # FAIT — LogReg + XGBoost comparés ; sauvegarde feature_columns.json ET model_metrics.json (lu par GET /model/metrics)
-│   │   ├── evaluate_model.py       # pas encore développé (séparé de train_model.py)
-│   │   └── saved_models/           # logreg_baseline.pkl, xgboost_v1.pkl, feature_columns.json, model_metrics.json (non versionnés)
+│   │   ├── train_model.py          # FAIT — LogReg + XGBoost évalués en walk-forward, servis réentraînés sur toutes les saisons ; écrit feature_columns.json ET model_metrics.json (lu par GET /model/metrics)
+│   │   ├── evaluate_model.py       # FAIT (2026-10-19) — walk-forward, métriques, comparaison appariée par bootstrap, mode --legacy
+│   │   └── saved_models/           # logreg_baseline.pkl, xgboost_v1.pkl, feature_columns.json, model_metrics.json, eval/oof_<variante>.csv (non versionnés)
 │   ├── raw/                        # games_raw_all_seasons.csv, games_history.csv (non versionnés)
 │   ├── processed/                  # games_clean.csv, game_features.csv, team_state.json (non versionnés)
 │   ├── notebooks/
@@ -254,7 +255,8 @@ Réécrit en profondeur cette session, en 3 vagues successives :
 
 ### Modèles (`data/models/train_model.py`)
 
-- Split temporel strict : train sur saisons ≠ `2025-26`, test sur `2025-26` uniquement.
+- **Depuis le 2026-10-19 : évaluation walk-forward** (voir "Amélioration des prédictions") : chaque saison de 2021-22 à 2025-26 est prédite par un modèle entraîné sur les saisons précédentes ; les modèles servis sont ensuite réentraînés sur toutes les saisons. Avant : split unique, train sur saisons ≠ `2025-26`, test sur `2025-26` (toujours calculé, `evaluation.legacy` de `model_metrics.json`).
+- Entraînement sur les matchs complets uniquement (`evaluate_model.complete_rows()`) ; l'évaluation garde tous les matchs, y compris ceux où `win_pct` manque.
 - Détection automatique des colonnes de features via liste blanche de motifs (`win_pct`, `rest_days`, `avg_pts_scored_last`, `avg_pts_allowed_last`, `net_rtg_last`, `elo`) — pas de liste figée à maintenir à la main.
 - **Deux modèles entraînés et comparés systématiquement** : Régression Logistique (dans un `Pipeline` avec `StandardScaler` — nécessaire depuis l'ajout de l'Elo, qui vit sur une échelle ~1300-1700 très différente de `win_pct` en 0-1 ; corrige aussi le `ConvergenceWarning`) et XGBoost (`n_estimators=300, max_depth=3, learning_rate=0.05`).
 - Les deux modèles sont sauvegardés dans `saved_models/` (`logreg_baseline.pkl` est maintenant le pipeline complet scaler+modèle, `xgboost_v1.pkl`).
@@ -269,7 +271,17 @@ Réécrit en profondeur cette session, en 3 vagues successives :
 | v3 + Elo + scaling LogReg                         | 68,6%           | 69,6%            | 0,596               |
 | **+ `rest_days` plafonné à 7 j (état final, 2026-10-14)** | **69,0%** | **68,9%**   | **0,595** (LogReg)  |
 
-(Le passage de 69,6 % à 68,9 % pour XGBoost n'est pas une régression réelle : sur 5 graines, XGBoost fait 69,1 % sans plafond contre 68,6 % avec, écart-type 0,4 pt ; l'IC à 95 % d'une accuracy sur 1 186 matchs est d'environ ±2,7 pts. Les deux modèles sont à égalité.)
+(Le passage de 69,6 % à 68,9 % pour XGBoost n'est pas une régression réelle : sur 5 graines, XGBoost fait 69,1 % sans plafond contre 68,6 % avec, écart-type 0,4 pt ; l'IC à 95 % d'une accuracy sur 1 186 matchs est d'environ ±2,7 pts.)
+
+**Walk-forward (2026-10-19, protocole de référence désormais)**, 6 140 matchs (2021-22 → 2025-26, matchs incomplets compris), XGBoost en moyenne sur 5 graines :
+
+| Modèle                  | Accuracy | Log loss | Brier  | ECE    |
+| ----------------------- | -------- | -------- | ------ | ------ |
+| Baseline (taux domicile de l'entraînement) | 55,3 % | 0,6876 | 0,2472 | 0,002 |
+| XGBoost (servi)         | 64,6 %   | 0,6346   | 0,2217 | 0,030  |
+| **Régression logistique** | **65,5 %** | **0,6199** | **0,2153** | **0,011** |
+
+Comparaison appariée XGBoost − LogReg : log loss **+0,0147** (IC95 [+0,0096 ; +0,0195]), Brier +0,0064 [+0,0041 ; +0,0084], même sens sur les 5 saisons → **la LogReg est significativement meilleure en probabilités** ; accuracy −0,85 pt [−1,70 ; +0,02], dans le bruit. Par saison (XGBoost / LogReg, log loss) : 2021-22 0,658/0,639 ; 2022-23 0,662/0,646 ; 2023-24 0,628/0,609 ; 2024-25 0,620/0,609 ; 2025-26 0,605/0,597. **2025-26 est la saison la plus facile à prédire de la période** : le 69 % du split unique surestimait la performance attendue (≈ 65 % en moyenne sur 5 saisons). Dispersion due aux graines (XGBoost) : 0,0013 de log loss, 0,3 pt d'accuracy.
 
 **Feature la plus importante dans les deux modèles : `diff_elo`** (loin devant `diff_win_pct`, qui était dominante avant l'ajout de l'Elo). `diff_net_rtg_last10` reste un signal solide en 2ᵉ position. `win_pct_context` apporte un complément modeste mais réel.
 
@@ -427,6 +439,7 @@ Validé visuellement côté utilisateur : cartes affichées correctement avec no
 14. **Logos des équipes (2026-09-29)** : voir "Logos des équipes" dans "Refonte UI" ci-dessous.
 15. **Plafond `rest_days` + documentation (2026-10-14)** : voir "Plafond des jours de repos" ci-dessous.
 16. **Déploiement sur le VPS (2026-10-14)** : en ligne sur https://nba.remicoimbra.fr, voir "Déploiement" ci-dessous.
+17. **Plan d'amélioration des prédictions + étape 1, évaluation walk-forward (2026-10-19)** : voir "Amélioration des prédictions" ci-dessous.
 
 ## Refonte UI (2026-09-28)
 
@@ -470,6 +483,37 @@ Demande de l'utilisateur : palette NBA bleu/blanc/rouge + mode sombre bleu/noir/
 - Vérifié : prédiction BOS–DEN le 2026-10-22 → repos 7/7 ; sur 2026-01-15 → repos `None`. `team_state.json` n'est pas affecté (il stocke `last_game_date`).
 - Observation, NON traitée : `train_model.prepare()` supprime 265 lignes (premiers matchs de chaque équipe/saison, `win_pct` ou `win_pct_context` manquants), donc le modèle n'a presque jamais vu `win_pct` = NaN, ce qui est le cas des 1ers matchs de la saison en live. Test : entraîner AVEC ces lignes n'aide pas (265 lignes seulement) ; sur les 39 matchs concernés de 2025-26, le modèle fait 58 % contre 62 % pour l'Elo seul (échantillon trop petit pour conclure). Piste si les premiers matchs de 2026-27 paraissent trop tranchés : rapprocher la proba de `elo_home_probability` tant que `win_pct` est manquant.
 - `schedule.json` régénéré le 2026-10-14 (J-3 → J+14) : la saison régulière 2026-27 commence le **2026-10-22** (2 matchs), 12 matchs le 2026-10-23. Vrais matchs de saison régulière prédits et affichés dans le navigateur (accueil clair/sombre, fiche match, page modèle).
+
+## Amélioration des prédictions (plan validé le 2026-10-19)
+
+Objectif de l'utilisateur : des probabilités mieux calibrées (log loss, Brier), mesurées honnêtement ; un gain dans le bruit n'est pas un gain. Plan en 6 étapes, dans cet ordre (l'utilisateur proposait calendrier avant Elo ; Elo avancé car c'est le seul signal déjà mesuré) :
+
+1. **Évaluation walk-forward** : FAIT le 2026-10-19 (détails ci-dessous).
+2. **Elo** : rendre K, avantage du terrain et régression inter-saison paramétrables (`EloParams` dans `features_lib.py`, valeurs par défaut = constantes actuelles), grille réglée sur le log loss de l'Elo seul des saisons 2020-21 → 2023-24, confirmation sur 2024-25/2025-26. Ajouter « Elo seul » comme modèle dans `model_metrics.json`, `elo_params` dans `model_metrics.json` ET `team_state.json` (avertissement de l'API s'ils diffèrent), et lire le « 25 % » de `ModelView.js` depuis les métriques. Indice mesuré avant le plan (optimiste, réglage vu sur 2025-26) : avantage du terrain 100 → proba domicile moyenne 61,7 % contre 55,4 % réel ; à 50, log loss de l'Elo seul 0,6075 → 0,5969 sur 2025-26.
+3. **Modèle** : sous-essais un par un — 3a `win_pct` lissé `(V + k·0,5)/(N + k)` dans `features_lib` (préféré au rapprochement a posteriori vers l'Elo, qui casserait l'additivité des facteurs SHAP) ; 3b élagage (diff_* + Elo) ; 3c XGBoost avec arrêt précoce ; 3d modèle de marge (Ridge, P = Φ(μ/σ)) ; 3e ensemble en log-odds ; 3f Platt seulement si ECE > 0,02 (pas d'isotonique). Modèle servi = meilleur log loss walk-forward (**décision en attente de l'utilisateur**, voir ci-dessous).
+4. **Calendrier** : `games_last_4d`, `travel_km` (table `ARENAS` statique), `tz_shift` ; tout se déduit de `recent_games`, pas de changement de `team_state.json`. Gain attendu dans le bruit (`rest_days` = 1 code déjà le back-to-back).
+5. **Score prédit** : régression du total + marge affichée = σ·Φ⁻¹(p servie) (signe toujours cohérent avec le vainqueur prédit) ; `score_model` dans `model_metrics.json`, tuile et texte dans `ModelView.js`.
+6. **Blessures** : essai court (1-2 j) puis go/no-go. Seul un indicateur calculé sur les matchs passés est cohérent avec la production (savoir qui joue CE match n'est possible que ~30 min avant, la synchro tourne à 10 h). Version complète = modifier `sync_to_vps.ps1` (accord de l'utilisateur requis).
+
+**Règles communes** : décision sur le Δ log loss regroupé du walk-forward, IC à 95 % par bootstrap apparié rééchantillonné par journée (2 000 tirages) entièrement < 0 et Brier non dégradé ; à égalité, adopter seulement si ça simplifie ; sinon résultat consigné ici et code non fusionné. Réglages d'hyperparamètres sur saisons ≤ 2023-24. Toujours rapporter aussi l'ancien découpage (`--legacy`). Rejouer `check_features.py` à chaque étape. Quand une étape change des features ou l'Elo : `deploy_to_vps.ps1` puis **immédiatement** `sync_to_vps.ps1` (côté utilisateur).
+
+**Questions ouvertes** : (1) étendre l'historique à 2016-17 → 2018-19 (rodage de l'Elo, plus de données) — sans réponse le 2026-10-19, resté sur 2019-20 ; (2) basculer l'API sur la régression logistique si elle bat XGBoost — **c'est désormais mesuré** (étape 1 ci-dessous), en attente de l'utilisateur ; (3) modifier `sync_to_vps.ps1` si l'essai blessures est concluant.
+
+### Étape 1 : évaluation walk-forward (FAIT le 2026-10-19)
+
+- `data/models/evaluate_model.py` : `walk_forward()` (pli = saison, entraînement sur toutes les saisons antérieures), `summarize()` (log loss, Brier, accuracy, ECE à 10 tranches ; moyenne et écart-type sur les graines 0-4 pour XGBoost), `paired_compare()` (Δ, IC bootstrap par journée, signe par saison), `legacy_split()`, `calibration_curve()` (prédictions des 5 graines empilées). CLI : `--variant NOM` sauvegarde `saved_models/eval/oof_NOM.csv`, `--compare REF` compare à une variante sauvegardée, `--legacy` pour l'ancien découpage. `train_model.py` importe ce module (l'inverse se fait dans `main()`, pour éviter un import croisé).
+- `train_model.py` : modèles servis réentraînés sur TOUTES les saisons (8 014 matchs complets, 2025-26 compris ; avant : 6 828, sans 2025-26). LogReg avec `SimpleImputer(median)` en tête du pipeline (sert seulement à la prédiction d'un match incomplet). XGBoost servi : graine 42, comme avant. Toujours XGBoost servi (`SERVED_MODEL`).
+- `model_metrics.json` : ajouts seulement. `models[]` (accuracy, log_loss = walk-forward regroupé ; + brier, ece, n_games, seed_sd), `baseline` (constante = taux de victoire à domicile des saisons d'entraînement), `served_model`, `evaluation` (`test_seasons`, `per_season[]`, `early_season`, `comparisons.xgboost_vs_logreg`, `legacy`). `test_games` = 6 140 matchs du walk-forward, `train_games` = matchs du modèle servi. `calibration` vient du walk-forward.
+- Front : tuiles Accuracy (modèle servi) / Gain vs baseline / Log loss / **Brier** (avec la valeur naïve), carte « Saison par saison » (`SeasonTable` dans `ModelCharts.js` ; colonne Matchs masquée sous `sm`), textes « Sans tricher » et « Les limites » mis à jour, `dec()` ajouté à `format.js`. La page affiche donc **64,6 %** (moyenne de 5 saisons) au lieu de 68,9 %.
+- `data/preprocessing/check_features.py` (nouveau) + `feature_engineering.build_features()` (pipeline en mémoire, extrait de `main()`) : (0) `game_features.csv` = features recalculées ; (1) 50 matchs de 2025-26 dont les 10 premiers (changement de saison) : `team_state` reconstruit avec les seuls matchs antérieurs → `PredictorService.build_feature_row()` identique au pipeline d'entraînement à 1e-9 ; (2) 5 matchs de 2022-23 au résultat inversé : aucune feature du match ni des matchs antérieurs ne bouge, les suivantes si. Les deux contrôles ont été vérifiés capables d'échouer (repos décalé d'un jour côté API, résultat injecté dans `diff_elo`).
+
+Résultats (tableau dans "Résultats obtenus" plus haut) et observations :
+- `--legacy` reproduit exactement les chiffres historiques (XGBoost 0,6889 / 0,6022, LogReg 0,6897 / 0,5954).
+- **Résultat négatif, non adopté** : entraîner aussi sur les ~265 matchs incomplets (XGBoost natif, LogReg avec imputation + indicateurs) : Δ log loss −0,0012 [−0,0030 ; +0,0006] pour XGBoost, +0,0008 [−0,0004 ; +0,0024] pour la LogReg, dans le bruit ; et la LogReg passe de 0,627 à 0,662 de log loss sur ces matchs. Entraînement sur matchs complets conservé.
+- Matchs d'ouverture (au moins une feature manquante, 191 dans le walk-forward) : Elo seul 0,634 de log loss, XGBoost 0,652-0,660, LogReg (imputation médiane) 0,627 ; les modèles y sous-estiment le domicile (≈ 50-52 % prédits pour 55,5 % réels). C'est la cible de l'étape 3a.
+- Modèle servi réentraîné : sur les 107 matchs de saison régulière du calendrier (2026-10-20 → 2026-11-02), écart moyen de 4,3 pts avec l'ancien XGBoost, sans dérive systématique (corrélation avec l'Elo seul : 0,94 contre 0,93 avant ; LogReg : 0,98). Cas extrême : BOS–DEN le 2026-10-22, 66 % → 50 % pour Boston (Elo seul 68 %) — les prédictions XGBoost des matchs d'ouverture sont instables d'un entraînement à l'autre.
+- Vérifié : `eslint`, `next build`, page « Le modèle » capturée par CDP en 375 px (clair/sombre, pas de débordement) et 1280 px, `/games/today` et `/games/{id}` en local, facteurs + base = logit(p). **Pas encore déployé** (côté utilisateur : `deploy_to_vps.ps1`, pas besoin de synchro, les features n'ont pas changé).
+- Capture headless « simple » (`--screenshot --window-size=375,...`) : Chrome n'émule pas vraiment 375 px, la page paraît coupée à droite. Utiliser CDP (`Emulation.setDeviceMetricsOverride`).
 
 ## Déploiement (VPS personnel, en ligne depuis le 2026-10-14)
 
@@ -564,7 +608,7 @@ docker run --rm python:3.12-slim sh -c "pip install -q nba_api && python -c \"fr
 2. **Finir le refactor API** : `routers/predictions.py`, `routers/teams.py`, `routers/players.py` sont toujours des fichiers vides — seul `routers/games.py` a une vraie logique pour l'instant.
 3. **Choix et setup de la BDD** : décider entre PostgreSQL local ou Supabase, créer les tables du schéma (à mettre à jour avec les vraies colonnes : Elo, Net Rating, win_pct_context...). `team_state.json` fait office de solution transitoire correcte pour l'instant.
 4. Tester `/games/today` (et le sélecteur de date du front) avec de VRAIS matchs programmés dès le retour de la saison régulière NBA (mi-octobre 2026) — jusque-là, le paramètre `?date=` ne permet qu'un test partiel (Elo/forme actuels appliqués à une date passée, voir limite documentée dans "Adaptation front" plus haut).
-5. (Optionnel) Poursuivre l'optimisation ML si le temps le permet : tuning XGBoost (GridSearch/early stopping), validation croisée temporelle multi-saisons pour vérifier la robustesse du gain Elo (actuellement mesuré sur une seule saison de test), affiner le calcul du Net Rating (ratio de sommes plutôt que moyenne de ratios, pour réduire le bruit). Amélioration possible aussi sur le score approximatif prédit (actuellement une heuristique simple, pas un vrai modèle de régression).
+5. **Amélioration des prédictions** : plan en 6 étapes, étape 1 (walk-forward) FAITE le 2026-10-19 ; suite = étape 2 (Elo), voir "Amélioration des prédictions". Hors plan, toujours possible : affiner le Net Rating (ratio de sommes plutôt que moyenne de ratios).
 6. ~~Dockeriser l'API~~ : abandonné, l'API tourne en service systemd isolé (voir "Déploiement").
 7. ~~Sortir la config en dur~~ : FAIT (`NEXT_PUBLIC_API_URL` au build, `NBA_CORS_ORIGINS` et `NBA_API_DOCS` dans `config.py`).
 8. ~~(Optionnel, UX) skeleton de chargement~~ : fait avec la refonte UI.
@@ -614,10 +658,22 @@ cd data
 python collectors\fetch_games.py          # réutilise le brut existant si présent
 python preprocessing\clean_data.py
 python preprocessing\feature_engineering.py
-python models\train_model.py
+python models\train_model.py             # walk-forward (~15 s) + modèles servis + model_metrics.json
 python preprocessing\team_state.py        # génère team_state.json — À REFAIRE après tout changement de games_clean.csv, l'API le lit directement
 python collectors\fetch_schedule.py       # génère schedule.json (calendrier J-3 → J+14)
 ```
+
+**Expérimenter / contrôler (sans toucher aux modèles servis) :**
+
+```powershell
+cd data
+python models\evaluate_model.py --variant baseline              # walk-forward, prédictions dans saved_models\eval\
+python models\evaluate_model.py --variant essai --compare baseline   # après modification des features : comparaison appariée
+python models\evaluate_model.py --legacy                        # ancien découpage (test 2025-26)
+python preprocessing\check_features.py                          # cohérence entraînement/API + absence de fuite (~15 s)
+```
+
+Sous Git Bash, préfixer par `PYTHONIOENCODING=utf-8` (sinon accents illisibles dans la console).
 
 **Synchro quotidienne (nouveaux matchs + calendrier), sans réentraînement :**
 
