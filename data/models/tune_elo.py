@@ -10,8 +10,12 @@ Protocole :
   est rejoué sur tout l'historique pour chacune (features_lib.compute_elo_timeline,
   le même code que l'entraînement et l'API) ;
 - objectif : log loss de la probabilité Elo d'avant-match sur
-  TUNING_SEASONS. 2019-20 sert de rodage (toutes les équipes partent de
-  1500) et n'est pas notée ;
+  TUNING_SEASONS. Les saisons antérieures servent de rodage (toutes les
+  équipes partent de 1500) et ne sont pas notées : 2019-20 lors du réglage
+  du 2026-10-19, 2016-17 -> 2019-20 depuis l'extension de l'historique
+  (grille rejouée le même jour : mêmes paramètres optimaux, log loss de
+  réglage 0,6328 -> 0,6329 ; avec une régression de 50 %, le point de
+  départ est oublié en deux saisons) ;
 - confirmation sur HOLDOUT_SEASONS, jamais utilisées pour choisir : écart
   apparié de log loss / Brier / accuracy avec les paramètres d'origine
   (IC à 95 % par bootstrap par journée, evaluate_model.paired_compare), et

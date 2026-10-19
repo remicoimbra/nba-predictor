@@ -11,6 +11,8 @@ away_team_id), à partir de :
   logistique, voir train_model.py pour le choix du modèle servi)
 - data/models/saved_models/feature_columns.json : ordre exact des colonnes
   attendu par le modèle (généré par train_model.py)
+- data/models/saved_models/model_metrics.json : paramètres du score prédit
+  (clé score_model) et paramètres Elo de l'entraînement
 
 Contrairement à feature_engineering.py (qui recalcule tout l'historique
 pour l'entraînement), ce module ne calcule QUE la ligne de features du
@@ -54,15 +56,20 @@ from features_lib import (  # type: ignore[import-not-found]  # noqa: E402
     ELO_INITIAL,
     FORM_WINDOW,
     ROLLING_WINDOWS,
+    SCORE_WINDOW,
     elo_expected_home,
     elo_for_target_season,
+    expected_margin,
+    expected_total,
     factor_family,
     is_later_season,
     linear_contributions,
     net_rtg_from_boxscore,
     rest_days,
     rolling_mean_last_n,
+    rounded_score,
     season_for_date,
+    split_score,
     win_pct,
 )
 
@@ -89,8 +96,8 @@ class GamePrediction:
     home_win_probability: float
     away_win_probability: float
     predicted_winner: str          # "home" ou "away"
-    predicted_home_score: float
-    predicted_away_score: float
+    predicted_home_score: int      # vainqueur du score = predicted_winner, jamais d'égalité
+    predicted_away_score: int
     elo_home_probability: float    # proba donnée par l'Elo seul, pour comparaison avec le modèle
     factors: list                  # [{key, label, contribution}] en log-odds, > 0 = favorise l'équipe à domicile
     base_value: float              # log-odds de départ du modèle (avant contributions)
@@ -128,6 +135,7 @@ class PredictorService:
         self._team_state: dict = {}
         self._team_state_mtime: float | None = None
         self._model_elo_params: dict | None = None
+        self._score_model: dict = {}
         self._load()
 
     def _load(self):
@@ -152,9 +160,18 @@ class PredictorService:
             self._feature_columns = json.load(f)
         try:
             with open(self.model_metrics_path, encoding="utf-8") as f:
-                self._model_elo_params = json.load(f).get("elo_params")
-        except (OSError, json.JSONDecodeError):
-            self._model_elo_params = None  # facultatif : seul le contrôle ci-dessous en dépend
+                metrics = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            raise PredictorNotReadyError(
+                f"model_metrics.json illisible ({self.model_metrics_path}) : {e}. Relancer train_model.py."
+            ) from e
+        # Paramètres du score prédit, appris avec le modèle (train_model.py).
+        self._score_model = metrics.get("score_model") or {}
+        if not {"sigma", "fallback_total"} <= self._score_model.keys():
+            raise PredictorNotReadyError(
+                "model_metrics.json sans score_model (antérieur au 2026-10-19) : relancer train_model.py."
+            )
+        self._model_elo_params = metrics.get("elo_params")
         self.reload_team_state()
 
     def reload_team_state(self):
@@ -182,7 +199,7 @@ class PredictorService:
             "team_state.json": self._team_state.get("as_of", {}).get("elo_params"),
         }
         if self._model_elo_params is None:
-            del sources["model_metrics.json"]  # ancien fichier ou absent : rien à comparer
+            del sources["model_metrics.json"]  # ancien fichier : rien à comparer
         if any(params != sources["features_lib.py"] for params in sources.values()):
             logger.warning("Paramètres Elo incohérents, prédictions faussées : %s", sources)
 
@@ -374,6 +391,23 @@ class PredictorService:
             f["contribution"] = round(f["contribution"], 4)
         return factors, base_value
 
+    def _scores(self, row: dict, home_win_proba: float, home_favored: bool) -> tuple[int, int]:
+        """
+        Score affiché, déduit de la probabilité (voir features_lib et
+        data/models/score_model.py) : total d'après les moyennes récentes des
+        deux équipes (repli : total moyen de la dernière saison connue à
+        l'entraînement), écart = sigma * Φ⁻¹(p). Évalué en walk-forward, au
+        contraire de l'ancienne heuristique.
+        """
+        total = expected_total(*(
+            row.get(f"{side}_avg_pts_{kind}_last{SCORE_WINDOW}")
+            for side, kind in (("home", "scored"), ("home", "allowed"), ("away", "scored"), ("away", "allowed"))
+        ))
+        if total is None:
+            total = self._score_model["fallback_total"]
+        margin = float(expected_margin(home_win_proba, self._score_model["sigma"]))
+        return rounded_score(*split_score(total, margin), home_favored)
+
     # ------------------------------------------------------------------
     # Prédiction
     # ------------------------------------------------------------------
@@ -403,32 +437,17 @@ class PredictorService:
         factors, base_value = self._factors(X)
         home_win_proba = float(proba[1])
         away_win_proba = float(proba[0])
-
-        # Score approximatif : simple heuristique (le modèle n'est PAS
-        # entraîné à prédire un score, seulement l'issue). On combine la
-        # forme offensive récente d'une équipe avec la forme défensive
-        # récente de l'adversaire. À affiner plus tard si un modèle de
-        # régression dédié est ajouté (cf. étape "optionnel" du CLAUDE.md).
-        home_off = row.get("home_avg_pts_scored_last10") or row.get("home_avg_pts_scored_last5")
-        away_def = row.get("away_avg_pts_allowed_last10") or row.get("away_avg_pts_allowed_last5")
-        away_off = row.get("away_avg_pts_scored_last10") or row.get("away_avg_pts_scored_last5")
-        home_def = row.get("home_avg_pts_allowed_last10") or row.get("home_avg_pts_allowed_last5")
-
-        predicted_home_score = (
-            (home_off + away_def) / 2 if home_off is not None and away_def is not None else 110.0
-        )
-        predicted_away_score = (
-            (away_off + home_def) / 2 if away_off is not None and home_def is not None else 108.0
-        )
+        home_favored = home_win_proba >= 0.5
+        home_score, away_score = self._scores(row, home_win_proba, home_favored)
 
         return GamePrediction(
             home_team_id=home_team_id,
             away_team_id=away_team_id,
             home_win_probability=round(home_win_proba, 4),
             away_win_probability=round(away_win_proba, 4),
-            predicted_winner="home" if home_win_proba >= 0.5 else "away",
-            predicted_home_score=round(predicted_home_score, 1),
-            predicted_away_score=round(predicted_away_score, 1),
+            predicted_winner="home" if home_favored else "away",
+            predicted_home_score=home_score,
+            predicted_away_score=away_score,
             elo_home_probability=round(float(elo_expected_home(row["home_elo"], row["away_elo"], DEFAULT_ELO_PARAMS)), 4),
             factors=factors,
             base_value=round(base_value, 4),

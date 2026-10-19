@@ -24,6 +24,7 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 import pandas as pd
+from scipy.special import ndtri  # Φ⁻¹, inverse de la fonction de répartition de la loi normale
 
 # --- Fenêtres de calcul (partagées batch + live) ---
 ROLLING_WINDOWS = [5, 10]
@@ -304,6 +305,58 @@ def net_rtg_from_boxscore(pts_scored: float, pts_allowed: float, fga: float, ore
     off_rtg = 100 * pts_scored / poss
     def_rtg = 100 * pts_allowed / poss
     return off_rtg - def_rtg
+
+
+# ---------------------------------------------------------------------------
+# Score prédit — partagé entre models/score_model.py (évaluation, réglage de
+# sigma) et predictor_service.py (score affiché)
+# ---------------------------------------------------------------------------
+#
+# Le modèle ne prédit que le vainqueur ; le score s'en déduit en deux temps :
+# - total des deux équipes : moyenne de l'attaque récente d'une équipe et de
+#   la défense récente de l'adversaire, pour chacune (SCORE_WINDOW matchs) ;
+# - écart : sigma * Φ⁻¹(p), p étant la probabilité de victoire à domicile
+#   du modèle servi. Si l'écart final suit une loi normale de moyenne mu et
+#   d'écart-type sigma, alors p = Φ(mu / sigma), donc mu = sigma * Φ⁻¹(p).
+#   Le vainqueur du score est donc toujours le favori du modèle.
+# Évaluation et choix (2026-10-19) : voir models/score_model.py.
+
+SCORE_WINDOW = 10
+PROBABILITY_CLIP = 1e-6  # évite Φ⁻¹(0) = -inf
+
+
+def expected_total(home_scored, home_allowed, away_scored, away_allowed):
+    """
+    Total de points attendu à partir des moyennes récentes (marqués /
+    encaissés) des deux équipes. Accepte scalaires ou tableaux ; None/NaN
+    si une moyenne manque.
+    """
+    if any(v is None for v in (home_scored, home_allowed, away_scored, away_allowed)):
+        return None
+    return (home_scored + away_allowed) / 2 + (away_scored + home_allowed) / 2
+
+
+def expected_margin(home_probability, sigma: float):
+    """Écart attendu (domicile - extérieur), en points : sigma * Φ⁻¹(p)."""
+    p = np.clip(home_probability, PROBABILITY_CLIP, 1 - PROBABILITY_CLIP)
+    return sigma * ndtri(p)
+
+
+def split_score(total, margin):
+    """(points domicile, points extérieur) d'un total et d'un écart."""
+    return (total + margin) / 2, (total - margin) / 2
+
+
+def rounded_score(home: float, away: float, home_favored: bool) -> tuple[int, int]:
+    """
+    Score affiché : entiers, sans égalité (impossible au basket). Arrondis
+    égaux (écart attendu de moins d'un point) : le favori prend un point de
+    plus. Le vainqueur du score reste celui du modèle.
+    """
+    h, a = int(round(home)), int(round(away))
+    if h == a:
+        h, a = (h + 1, a) if home_favored else (h, a + 1)
+    return h, a
 
 
 # ---------------------------------------------------------------------------

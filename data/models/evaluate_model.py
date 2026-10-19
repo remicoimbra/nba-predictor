@@ -50,11 +50,24 @@ import pandas as pd
 
 TARGET_COL = "home_win"
 
-# Saisons prédites une à une. 2019-20 et 2020-21 ne servent qu'à
-# l'entraînement : avant 2021-22, le premier pli aurait moins de deux
-# saisons d'historique (et un Elo encore en rodage, parti de 1500).
+# Saisons prédites une à une ; les saisons antérieures (2016-17 -> 2020-21
+# depuis l'extension de l'historique du 2026-10-19) ne servent qu'à
+# l'entraînement. Liste inchangée depuis l'étape 1 du plan, pour que toutes
+# les variantes se comparent sur les mêmes matchs.
 WALK_FORWARD_SEASONS = ("2021-22", "2022-23", "2023-24", "2024-25", "2025-26")
 SEEDS = (0, 1, 2, 3, 4)
+
+# Poids des saisons d'entraînement : 0,5 ** (âge / SEASON_HALF_LIFE), l'âge
+# étant compté depuis la saison la plus récente de l'entraînement (poids 1).
+# La NBA change : 58-59 % de victoires à domicile en 2016-19 contre 54-55 %
+# depuis. Sans poids, l'historique étendu à 2016-17 pousse la régression
+# logistique vers le domicile (+1,3 pt de proba moyenne en trop). Mesuré le
+# 2026-10-19 en walk-forward contre l'historique 2019-20 sans poids :
+# -0,0010 de log loss [-0,0017 ; -0,0003], Brier -0,0005, 4 saisons sur 5 ;
+# demi-vie réglée sur 2021-22 -> 2023-24 (plateau de 1 à 5 saisons). Les
+# poids seuls sur l'ancien historique, ou l'historique seul, restent dans le
+# bruit.
+SEASON_HALF_LIFE = 2.0
 
 # Ancien protocole (un seul découpage), gardé pour comparer avec les
 # chiffres historiques du projet (69,0 % / 0,595).
@@ -78,11 +91,27 @@ class ModelSpec:
     name: str
     factory: Callable
     stochastic: bool = False  # True : une passe par graine de SEEDS
+    # Nom du paramètre de fit() qui reçoit les poids des matchs
+    # (season_weights) ; None : modèle sans apprentissage, pas de poids.
+    weight_param: str | None = None
 
 
 # ---------------------------------------------------------------------------
 # Walk-forward
 # ---------------------------------------------------------------------------
+
+def season_weights(seasons: pd.Series, half_life: float = SEASON_HALF_LIFE) -> np.ndarray:
+    """Poids de chaque match d'entraînement selon l'âge de sa saison (voir SEASON_HALF_LIFE)."""
+    start_year = seasons.astype(str).str[:4].astype(int)
+    return 0.5 ** ((start_year.max() - start_year).to_numpy(dtype=float) / half_life)
+
+
+def fit_spec(spec: ModelSpec, seed: int, train: pd.DataFrame, feature_cols: list[str]):
+    """Nouveau modèle de `spec`, entraîné sur `train` avec les poids par saison."""
+    model = spec.factory(seed)
+    weights = {spec.weight_param: season_weights(train["season"])} if spec.weight_param else {}
+    return model.fit(train[feature_cols], train[TARGET_COL], **weights)
+
 
 def early_season_mask(df: pd.DataFrame) -> pd.Series:
     """
@@ -151,8 +180,7 @@ def walk_forward(
 
         for spec in specs:
             for seed in (seeds if spec.stochastic else (None,)):
-                model = spec.factory(0 if seed is None else seed)
-                model.fit(train[feature_cols], train[TARGET_COL])
+                model = fit_spec(spec, 0 if seed is None else seed, train, feature_cols)
                 col = f"p_{spec.key}" if seed is None else f"p_{spec.key}_s{seed}"
                 out[col] = model.predict_proba(test[feature_cols])[:, 1]
 
@@ -174,8 +202,7 @@ def legacy_split(df: pd.DataFrame, feature_cols: list[str], specs: list[ModelSpe
 
     models = {}
     for spec in specs:
-        model = spec.factory(LEGACY_SEED)
-        model.fit(train[feature_cols], train[TARGET_COL])
+        model = fit_spec(spec, LEGACY_SEED, train, feature_cols)
         p = model.predict_proba(test[feature_cols])[:, 1]
         models[spec.key] = {m: float(v.mean()) for m, v in per_game_scores(y, p).items()}
     return {
@@ -316,15 +343,27 @@ def paired_compare(
     common = a.index.intersection(b.index)
     meta = oof_a.set_index("nba_game_id").loc[common, ["game_date", "season"]]
     diff = (a.loc[common] - b.loc[common]).to_numpy()
+    return paired_bootstrap(diff, meta["game_date"], meta["season"], metric, draws, seed)
 
-    _, day_idx = np.unique(meta["game_date"].to_numpy(), return_inverse=True)
+
+def paired_bootstrap(
+    diff: np.ndarray, game_dates, seasons, metric: str,
+    draws: int = BOOTSTRAP_DRAWS, seed: int = BOOTSTRAP_SEED,
+) -> dict:
+    """
+    Cœur de paired_compare(), pour n'importe quelle métrique par match :
+    `diff` = écart (a - b) match par match, `game_dates` et `seasons`
+    alignés dessus. Sert aussi à l'erreur du score prédit (score_model.py).
+    """
+    diff = np.asarray(diff, dtype=float)
+    _, day_idx = np.unique(np.asarray(game_dates), return_inverse=True)
     day_sums = np.bincount(day_idx, weights=diff)
     day_counts = np.bincount(day_idx)
     picks = np.random.default_rng(seed).integers(0, len(day_sums), size=(draws, len(day_sums)))
     boot = day_sums[picks].sum(axis=1) / day_counts[picks].sum(axis=1)
     ci_low, ci_high = np.percentile(boot, [2.5, 97.5])
 
-    seasons = meta["season"].to_numpy()
+    seasons = np.asarray(seasons)
     per_season = {str(s): float(diff[seasons == s].mean()) for s in sorted(np.unique(seasons))}
     return {
         "metric": metric,
@@ -332,7 +371,7 @@ def paired_compare(
         "ci_low": float(ci_low),
         "ci_high": float(ci_high),
         "significant": bool(ci_low > 0 or ci_high < 0),
-        "n_games": int(len(common)),
+        "n_games": int(len(diff)),
         "per_season": per_season,
     }
 

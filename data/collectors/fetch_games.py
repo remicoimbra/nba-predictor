@@ -36,7 +36,9 @@ from features_lib import season_for_date  # type: ignore[import-not-found]  # no
 
 # --- Config -----------------------------------------------------------
 
-FIRST_SEASON_START_YEAR = 2019  # 2019-20
+# 2016-17 depuis le 2026-10-19 (avant : 2019-20) : trois saisons de plus pour
+# l'entraînement et le rodage de l'Elo. Voir CLAUDE.md, "Historique étendu".
+FIRST_SEASON_START_YEAR = 2016
 SEASON_TYPE = "Regular Season"  # ou "Playoffs" si tu veux les inclure séparément
 SLEEP_BETWEEN_CALLS = 1.5  # secondes, pour ne pas se faire bloquer
 MAX_RETRIES = 3
@@ -47,7 +49,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def all_seasons(today: date | None = None) -> list[str]:
     """
-    De 2019-20 jusqu'à la saison en cours INCLUSE (calculée à partir de la
+    De 2016-17 jusqu'à la saison en cours INCLUSE (calculée à partir de la
     date, pas figée dans le code : une liste en dur aurait silencieusement
     ignoré 2026-27 au changement de saison).
     """

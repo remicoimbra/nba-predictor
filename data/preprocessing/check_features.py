@@ -20,7 +20,9 @@ match), pas seulement sur celles du modèle (feature_columns.json).
    sont toujours inclus : ils passent par le changement de saison
    (régression Elo, bilans remis à zéro). Pour ces mêmes matchs,
    l'explication servie doit être exacte : biais + somme des facteurs =
-   logit de la probabilité (à l'arrondi de l'API près).
+   logit de la probabilité (à l'arrondi de l'API près), et le score servi
+   doit être celui des formules de features_lib appliquées aux features
+   d'entraînement, avec le vainqueur prédit en tête.
 2. Absence de fuite temporelle : on inverse le résultat d'un match (scores
    et boxscores échangés) et on recalcule toutes les features. Celles de ce
    match et des matchs antérieurs ne doivent pas bouger ; celles des matchs
@@ -42,6 +44,7 @@ import numpy as np
 import pandas as pd
 
 from feature_engineering import build_features
+from features_lib import SCORE_WINDOW, expected_margin, expected_total, rounded_score, split_score
 from team_state import build_team_state
 
 DATA_DIR = Path(__file__).resolve().parent.parent
@@ -97,6 +100,20 @@ def check_features_file_up_to_date(batch: pd.DataFrame, columns: list[str], mode
     return True
 
 
+def batch_score(service: PredictorService, batch_row: pd.Series) -> tuple[int, int]:
+    """Score attendu d'après les features d'entraînement (modèle et sigma du service)."""
+    model_cols = service._feature_columns
+    p = float(service._model.predict_proba(batch_row[model_cols].to_frame().T.astype(float))[0, 1])
+    total = expected_total(*(
+        batch_row[f"{side}_avg_pts_{kind}_last{SCORE_WINDOW}"]
+        for side, kind in (("home", "scored"), ("home", "allowed"), ("away", "scored"), ("away", "allowed"))
+    ))
+    if pd.isna(total):
+        total = service._score_model["fallback_total"]
+    margin = float(expected_margin(p, service._score_model["sigma"]))
+    return rounded_score(*split_score(total, margin), p >= 0.5)
+
+
 def check_train_live_consistency(clean: pd.DataFrame, batch: pd.DataFrame, columns: list[str]) -> bool:
     counts = clean["season"].value_counts()
     season = max(s for s, n in counts.items() if n >= MIN_SEASON_GAMES)
@@ -109,6 +126,7 @@ def check_train_live_consistency(clean: pd.DataFrame, batch: pd.DataFrame, colum
     batch_rows = batch.set_index("nba_game_id")
 
     failures = []
+    score_failures = []
     worst_gap = 0.0  # écart max |biais + somme des facteurs - logit(p)|
     with tempfile.TemporaryDirectory() as tmp:
         state_path = Path(tmp) / "team_state.json"
@@ -136,6 +154,11 @@ def check_train_live_consistency(clean: pd.DataFrame, batch: pd.DataFrame, colum
                 explained = pred.base_value + sum(f["contribution"] for f in pred.factors)
                 worst_gap = max(worst_gap, abs(explained - math.log(p / (1 - p))))
 
+                served = (pred.predicted_home_score, pred.predicted_away_score)
+                home_ahead = served[0] > served[1]
+                if served != batch_score(service, batch_rows.loc[game.nba_game_id]) or home_ahead != (pred.predicted_winner == "home"):
+                    score_failures.append((game.nba_game_id, served, pred.predicted_winner))
+
     ok = True
     if failures:
         print(f"  ÉCHEC : {len(failures)} matchs sur {len(sample)} diffèrent entre entraînement et API")
@@ -149,6 +172,11 @@ def check_train_live_consistency(clean: pd.DataFrame, batch: pd.DataFrame, colum
         ok = False
     else:
         print(f"  OK : biais + facteurs = logit(p) pour ces matchs (écart max {worst_gap:.1e}, arrondis de l'API)")
+    if score_failures:
+        print(f"  ÉCHEC : score servi différent du calcul d'entraînement ou du vainqueur prédit : {score_failures[:5]}")
+        ok = False
+    else:
+        print("  OK : score servi = formules de features_lib sur les features d'entraînement, vainqueur prédit en tête")
     return ok
 
 
