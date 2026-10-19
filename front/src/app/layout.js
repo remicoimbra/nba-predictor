@@ -43,7 +43,7 @@ export default function RootLayout({ children }) {
             {children}
           </main>
           <footer className="border-t border-line py-6 text-center text-sm text-text-2">
-            Projet portfolio · modèle entraîné sur 7 saisons NBA · prédictions indicatives
+            Projet portfolio · modèle entraîné sur 10 saisons NBA · prédictions indicatives
           </footer>
         </Providers>
       </body>

@@ -62,6 +62,9 @@ function Card({ title, subtitle, children, className = "" }) {
 function ModelDetail({ m }) {
   const served = m.models.find((x) => x.key === m.served_model);
   const elo = m.elo_params; // absent des métriques d'avant le 2026-10-19
+  const scoreError = m.score_model?.evaluation.methods.find(
+    (x) => x.key === "model",
+  )?.mae_team;
   const gain = served.accuracy - m.baseline_accuracy;
   const seasons = m.evaluation.test_seasons;
   const period = `${seasons[0]} → ${seasons.at(-1)}`;
@@ -141,6 +144,8 @@ function ModelDetail({ m }) {
         <SeasonTable metrics={m} />
       </Card>
 
+      {m.score_model && <ScoreCard score={m.score_model} period={period} />}
+
       <Card
         title="Ce qui compte le plus"
         subtitle="Poids moyen de chaque famille de statistiques dans les prédictions (part du total). « Forme récente » réunit le bilan et le Net Rating des derniers matchs."
@@ -180,7 +185,11 @@ function ModelDetail({ m }) {
               <u>avant</u> celui à prédire. Chaque saison de {seasons[0]} à{" "}
               {seasons.at(-1)} est prédite par un modèle qui ne l&apos;a jamais
               vue, entraîné sur les saisons précédentes. Le modèle en ligne est
-              ensuite réentraîné sur toutes les saisons.
+              ensuite réentraîné sur toutes les saisons
+              {m.train_seasons && ` depuis ${m.train_seasons[0]}`}
+              {m.season_half_life &&
+                `, les plus anciennes comptant moins (poids divisé par deux toutes les ${int(m.season_half_life)} saisons) car le jeu évolue`}
+              .
             </p>
           </div>
           <div>
@@ -189,8 +198,10 @@ function ModelDetail({ m }) {
             </h3>
             <p>
               Le modèle ignore les blessures, les transferts et les matchs sans
-              enjeu. Il ne prédit que le vainqueur : le score affiché est une
-              estimation simple. Environ un match sur trois reste mal prédit.
+              enjeu. Environ un match sur trois reste mal prédit, et le score
+              estimé se trompe en moyenne de{" "}
+              {scoreError ? `${num(scoreError)} points` : "plusieurs points"}{" "}
+              par équipe.
             </p>
           </div>
         </div>
@@ -199,5 +210,52 @@ function ModelDetail({ m }) {
         </p>
       </Card>
     </div>
+  );
+}
+
+// Erreur moyenne du score estimé (walk-forward), comparée à l'ancienne
+// méthode et à la référence naïve. score.evaluation.methods : model,
+// previous, naive (data/models/score_model.py).
+function ScoreCard({ score, period }) {
+  const methods = Object.fromEntries(
+    score.evaluation.methods.map((x) => [x.key, x]),
+  );
+  const { model, previous, naive } = methods;
+  const stats = [
+    { label: "Par équipe", key: "mae_team" },
+    { label: "Sur l'écart", key: "mae_margin" },
+    { label: "Sur le total", key: "mae_total" },
+  ];
+
+  return (
+    <Card
+      title="Score estimé"
+      subtitle={`Écart moyen entre le score estimé et le score réel, saisons ${period} (prédites sans les avoir vues). Plus bas = mieux.`}
+    >
+      <dl className="grid gap-3 sm:grid-cols-3">
+        {stats.map((s) => (
+          <div key={s.key} className="rounded-xl border border-line bg-surface p-4">
+            <dt className="text-sm text-text-2">{s.label}</dt>
+            <dd className="mt-1 text-3xl font-bold tracking-tight">
+              {num(model[s.key])} pts
+            </dd>
+            <dd className="text-sm text-text-2">
+              ancienne méthode {num(previous[s.key])} · naïf{" "}
+              {num(naive[s.key])}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <p className="mt-5 max-w-3xl text-sm leading-relaxed text-text-2">
+        Le total vient des points marqués et encaissés par les deux équipes
+        sur leurs {int(score.window)} derniers matchs. L&apos;écart est déduit
+        de la probabilité de victoire : plus elle s&apos;éloigne de 50 %, plus
+        l&apos;écart grandit (jusqu&apos;à une douzaine de points). Le favori
+        du modèle est donc toujours devant, alors que l&apos;ancienne méthode,
+        qui estimait chaque équipe séparément, désignait un autre vainqueur
+        dans {pct(previous.winner_mismatch)} des matchs. «&nbsp;Naïf&nbsp;» :
+        le score moyen de la saison précédente pour tous les matchs.
+      </p>
+    </Card>
   );
 }
