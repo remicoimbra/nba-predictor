@@ -34,21 +34,23 @@ nba-predictor/
 │   ├── collectors/
 │   │   ├── fetch_games.py          # FAIT — voir "État du pipeline ML" ci-dessous ; saisons depuis 2016-17 (2026-10-19, avant 2019-20)
 │   │   ├── fetch_schedule.py       # FAIT (2026-09-28) — calendrier J-3 → J+14 → processed/schedule.json (lu par l'API)
+│   │   ├── fetch_player_logs.py    # FAIT (2026-10-19, étape 6) — feuilles de match par joueur → raw/player_games_raw.csv (cache + --refresh)
 │   │   ├── fetch_players_stats.py  # pas encore développé
 │   │   └── fetch_teams_stats.py    # pas encore développé
 │   ├── preprocessing/
 │   │   ├── clean_data.py           # FAIT
 │   │   ├── feature_engineering.py  # FAIT — v3 (Pace/Net Rating, win_pct contexte, Elo), refactoré cette session
 │   │   ├── features_lib.py         # FAIT (nouveau, cette session) — logique Elo/rolling stats PARTAGÉE entre feature_engineering.py (batch) et predictor_service.py (live) ; EloParams + DEFAULT_ELO_PARAMS (réglés le 2026-10-19) ; FACTOR_FAMILIES + linear_contributions() (explication, étape 3) ; formules du score (expected_total, expected_margin, split_score, rounded_score, étape 5)
+│   │   ├── player_games.py         # FAIT (2026-10-19, étape 6) — lecture/typage des feuilles joueur, restriction aux matchs de games_clean
 │   │   ├── team_state.py           # FAIT — construit team_state.json (état courant par équipe) ; + opponent_id/elo_before par match récent et elo_history (30 pts) depuis la refonte UI ; as_of.elo_params depuis le 2026-10-19
 │   │   └── check_features.py       # FAIT (2026-10-19) — contrôles sur les 31 features calculées : game_features.csv à jour, cohérence entraînement/API (+ biais + facteurs = logit(p)), absence de fuite (voir "Amélioration des prédictions")
 │   ├── models/
-│   │   ├── train_model.py          # FAIT — LogReg (SERVIE depuis l'étape 3) + XGBoost (arrêt précoce) + Elo seul (EloOnly) évalués en walk-forward sur 11 features (diff_* + home/away_elo), réentraînés sur toutes les saisons ; écrit feature_columns.json ET model_metrics.json (lu par GET /model/metrics)
+│   │   ├── train_model.py          # FAIT — LogReg (SERVIE depuis l'étape 3) + XGBoost (arrêt précoce) + Elo seul (EloOnly) évalués en walk-forward sur 12 features (diff_* + home/away_elo ; 11 avant l'effectif de l'étape 6), réentraînés sur toutes les saisons ; écrit feature_columns.json ET model_metrics.json (lu par GET /model/metrics)
 │   │   ├── evaluate_model.py       # FAIT (2026-10-19) — walk-forward, métriques, comparaison appariée par bootstrap (paired_bootstrap générique), poids par saison (season_weights, SEASON_HALF_LIFE = 2), mode --legacy
 │   │   ├── score_model.py          # FAIT (2026-10-19, étape 5) — score prédit : sigma, walk-forward des erreurs (MAE), comparaison à l'ancienne heuristique et au naïf
 │   │   ├── tune_elo.py             # FAIT (2026-10-19) — grille K × avantage du terrain × régression, notée sur la log loss de l'Elo seul
 │   │   └── saved_models/           # logreg.pkl (servi), xgboost.pkl (XGBClassifier nu, comparaisons locales), feature_columns.json, model_metrics.json (dont score_model, LU PAR L'API), eval/oof_<variante>.csv (référence actuelle : oof_history_hl2.csv), eval/tune_elo_grid.csv (non versionnés)
-│   ├── raw/                        # games_raw_all_seasons.csv, games_history.csv (non versionnés)
+│   ├── raw/                        # games_raw_all_seasons.csv, games_history.csv, player_games_raw.csv (non versionnés)
 │   ├── processed/                  # games_clean.csv, game_features.csv, team_state.json (non versionnés)
 │   ├── notebooks/
 │   └── requirements.txt            # FAIT — versions de scikit-learn/xgboost/joblib/scipy alignées sur api/requirements.txt (les .pkl sont rechargés par l'API)
@@ -64,14 +66,12 @@ nba-predictor/
 │   │   ├── schemas/                # à créer (schémas Pydantic)
 │   │   ├── routers/
 │   │   │   ├── games.py            # FAIT — /games/today (+ résumé équipes), /games/calendar, /games/{game_id} (fiche complète)
-│   │   │   ├── model.py            # FAIT (refonte UI) — /model/metrics (lit model_metrics.json)
-│   │   │   ├── predictions.py      # à créer
-│   │   │   ├── teams.py            # à créer
-│   │   │   └── players.py          # à créer
+│   │   │   └── model.py            # FAIT (refonte UI) — /model/metrics (lit model_metrics.json)
+│   │   │                           # (predictions.py, teams.py, players.py : fichiers vides supprimés le 2026-10-19, à recréer si besoin)
 │   │   └── services/
 │   │       ├── predictor_service.py    # FAIT — charge logreg.pkl (xgboost_v1.pkl avant l'étape 3) + team_state.json, construit les features live, prédit et explique (contributions linéaires)
-│   │       ├── schedule_service.py     # FAIT — lit processed/schedule.json ; appel direct ScoreboardV3 en repli (dev local uniquement)
-│   │       └── nba_sync_service.py     # VIDE, OBSOLÈTE — remplacé par infra/sync_to_vps.ps1 (NBA bloquée depuis le VPS), à supprimer
+│   │       └── schedule_service.py     # FAIT — lit processed/schedule.json ; appel direct ScoreboardV3 en repli (dev local uniquement)
+│   │                                   # (nba_sync_service.py, vide, supprimé le 2026-10-19 : remplacé par infra/sync_to_vps.ps1)
 │   ├── tests/
 │   └── requirements.txt            # FAIT — pip freeze du venv (⚠️ sous PowerShell 5.1, `pip freeze > requirements.txt` écrit en UTF-16 : reconvertir en UTF-8)
 │
@@ -308,7 +308,18 @@ XGBoost − LogReg : log loss +0,0139 [+0,0090 ; +0,0185]. **XGBoost − Elo seu
 
 LogReg − XGBoost : −0,0040 [−0,0064 ; −0,0015], Brier −0,0018, 5/5 saisons. LogReg − Elo seul : −0,0010 [−0,0030 ; +0,0011], dans le bruit. Servi avant/après (LogReg étape 3 − XGBoost d'avant) : **−0,0156 [−0,0202 ; −0,0106]**, Brier −0,0068, accuracy +0,9 pt [+0,05 ; +1,8], 5/5 saisons ; sur 2024-25 + 2025-26 : −0,0096 [−0,0164 ; −0,0031]. Par saison (LogReg / XGBoost / Elo seul) : 2021-22 0,635/0,639/0,632 ; 2022-23 0,643/0,647/0,647 ; 2023-24 0,609/0,616/0,612 ; 2024-25 0,605/0,610/0,607 ; 2025-26 0,595/0,596/0,594. `--legacy` : LogReg 0,6906/0,5931, XGBoost 0,6948/0,5961, Elo seul 0,6922/0,5920. Dispersion XGBoost entre graines : 0,0005.
 
-**Après l'historique étendu + poids par saison (2026-10-19, état actuel)**, même protocole (référence : `oof_history_hl2.csv`) :
+**Après l'effectif (étape 6, 2026-10-19, état actuel, 12 features)**, même protocole (référence : `oof_lineup.csv`) :
+
+| Modèle                  | Accuracy | Log loss | Brier  | ECE    |
+| ----------------------- | -------- | -------- | ------ | ------ |
+| Baseline                | 55,3 %   | 0,6879   | 0,2474 | 0,014  |
+| **Régression logistique (servie)** | **66,1 %** | **0,6141** | **0,2128** | 0,010 |
+| XGBoost                 | 65,7 %   | 0,6180   | 0,2146 | 0,014  |
+| Elo seul                | 65,9 %   | 0,6184   | 0,2148 | 0,015  |
+
+Face à `history_hl2` : LogReg −0,0023 [−0,0040 ; −0,0006], XGBoost −0,0015 [−0,0028 ; −0,0002]. LogReg − XGBoost −0,0039 [−0,0061 ; −0,0015] ; **LogReg − Elo seul −0,0042 [−0,0070 ; −0,0015], 5/5**. Détails : "Étape 6".
+
+**Après l'historique étendu + poids par saison (2026-10-19)**, même protocole (référence : `oof_history_hl2.csv`) :
 
 | Modèle                  | Accuracy | Log loss | Brier  | ECE    |
 | ----------------------- | -------- | -------- | ------ | ------ |
@@ -480,6 +491,7 @@ Validé visuellement côté utilisateur : cartes affichées correctement avec no
 19. **Étape 3, modèle (2026-10-19)** : élagage à 11 features et arrêt précoce d'XGBoost adoptés, lissage du bilan / modèle de marge / ensembles écartés, **régression logistique servie** (choix de l'utilisateur), explication par contributions linéaires, voir "Étape 3" ci-dessous. Déployé le 2026-10-19 (commit `7903758`).
 20. **Historique étendu à 2016-17 + poids par saison, et étape 5, score prédit (2026-10-19)** : voir "Historique étendu" et "Étape 5" ci-dessous. Déployé le 2026-10-19 (20:21, commit `3b64e1a`), `deploy_to_vps.ps1` seul.
 21. **Étape 4, calendrier (2026-10-19)** : essayée, non adoptée (aucun gain qui tienne sur 2024-25 + 2025-26), voir "Étape 4" ci-dessous. Aucun code fusionné.
+22. **Étape 6, blessures (2026-10-19)** : essai concluant (indicateur d'effectif tiré des feuilles de match par joueur, −0,0023 de log loss, tient sur 2024-25 + 2025-26), puis intégré avec l'accord de l'utilisateur (nouveau collecteur, `team_state.json`, API, front, `sync_to_vps.ps1`), voir "Étape 6" ci-dessous. Déployé le 2026-10-19 (21:20, commit `513470a`) + synchro.
 
 ## Refonte UI (2026-09-28)
 
@@ -528,7 +540,7 @@ Demande de l'utilisateur : palette NBA bleu/blanc/rouge + mode sombre bleu/noir/
 
 Objectif de l'utilisateur : des probabilités mieux calibrées (log loss, Brier), mesurées honnêtement ; un gain dans le bruit n'est pas un gain. Plan en 6 étapes, dans cet ordre (l'utilisateur proposait calendrier avant Elo ; Elo avancé car c'est le seul signal déjà mesuré) :
 
-**Avancement : étapes 1, 2, 3 et 5 (score) + question ouverte 1 (historique) faites et déployées le 2026-10-19 ; étape 4 (calendrier) essayée le 2026-10-19, non adoptée (rien à déployer) ; reste l'étape 6 (blessures).**
+**Avancement : étapes 1, 2, 3 et 5 (score) + question ouverte 1 (historique) faites et déployées le 2026-10-19 ; étape 4 (calendrier) essayée le 2026-10-19, non adoptée (rien à déployer) ; étape 6 (blessures) essayée le 2026-10-19, concluante (−0,0023 de log loss) et intégrée et déployée le même jour (voir "Étape 6"). Le plan est terminé.**
 
 1. **Évaluation walk-forward** : FAIT le 2026-10-19 (détails ci-dessous).
 2. **Elo** : FAIT le 2026-10-19 (détails dans "Étape 2" ci-dessous). Plan d'origine : rendre K, avantage du terrain et régression inter-saison paramétrables (`EloParams` dans `features_lib.py`, valeurs par défaut = constantes actuelles), grille réglée sur le log loss de l'Elo seul des saisons 2020-21 → 2023-24, confirmation sur 2024-25/2025-26. Ajouter « Elo seul » comme modèle dans `model_metrics.json`, `elo_params` dans `model_metrics.json` ET `team_state.json` (avertissement de l'API s'ils diffèrent), et lire le « 25 % » de `ModelView.js` depuis les métriques. Indice mesuré avant le plan (optimiste, réglage vu sur 2025-26) : avantage du terrain 100 → proba domicile moyenne 61,7 % contre 55,4 % réel ; à 50, log loss de l'Elo seul 0,6075 → 0,5969 sur 2025-26.
@@ -539,7 +551,7 @@ Objectif de l'utilisateur : des probabilités mieux calibrées (log loss, Brier)
 
 **Règles communes** : décision sur le Δ log loss regroupé du walk-forward, IC à 95 % par bootstrap apparié rééchantillonné par journée (2 000 tirages) entièrement < 0 et Brier non dégradé ; à égalité, adopter seulement si ça simplifie ; sinon résultat consigné ici et code non fusionné. Réglages d'hyperparamètres sur saisons ≤ 2023-24. Toujours rapporter aussi l'ancien découpage (`--legacy`). Rejouer `check_features.py` à chaque étape. Quand une étape change des features ou l'Elo : `deploy_to_vps.ps1` puis **immédiatement** `sync_to_vps.ps1` (côté utilisateur).
 
-**Questions ouvertes** : (1) ~~étendre l'historique à 2016-17 → 2018-19~~ : **fait le 2026-10-19 à la demande de l'utilisateur**, adopté avec un poids par saison (voir "Historique étendu") ; (2) ~~modèle servi~~ : **tranché le 2026-10-19, régression logistique** (proposée face à XGBoost amélioré et à l'Elo seul, choisie par l'utilisateur) ; (3) modifier `sync_to_vps.ps1` si l'essai blessures est concluant.
+**Questions ouvertes** : (1) ~~étendre l'historique à 2016-17 → 2018-19~~ : **fait le 2026-10-19 à la demande de l'utilisateur**, adopté avec un poids par saison (voir "Historique étendu") ; (2) ~~modèle servi~~ : **tranché le 2026-10-19, régression logistique** (proposée face à XGBoost amélioré et à l'Elo seul, choisie par l'utilisateur) ; (3) ~~modifier `sync_to_vps.ps1` si l'essai blessures est concluant~~ : **accepté par l'utilisateur le 2026-10-19, fait**.
 
 ### Étape 1 : évaluation walk-forward (FAIT le 2026-10-19)
 
@@ -631,6 +643,36 @@ Banc d'essai hors dépôt (scratchpad, non conservé), même protocole que l'ét
 - Coefficients de la LogReg entraînée sur tout (features standardisées) : `diff_travel_km` −0,047 (−0,062 en back-to-back), `diff_games_last_4d` −0,022, `diff_tz_shift` +0,009 : signes attendus (plus de route ou de matchs que l'adversaire = moins de chances), effets minimes devant `diff_rest_days`, qui code déjà le back-to-back.
 - Si la piste est reprise un jour : ne pas regarder de nouveau les saisons 2024-25/2025-26 pour choisir la forme (déjà « consommées » ici) ; attendre 2026-27 comme confirmation.
 
+### Étape 6 : blessures / effectif (essai concluant, intégré et DÉPLOYÉ le 2026-10-19, accord de l'utilisateur)
+
+Essai d'abord sur un banc hors dépôt (scratchpad de la session), même protocole que les étapes 3-4, référence `oof_history_hl2.csv` reproduite à 3e-8 près ; intégration ensuite (voir « Intégration » en fin de section).
+
+- **Données** : `LeagueGameLog(player_or_team_abbreviation="P", season_type_all_star="Regular Season")`, une requête par saison (~2 s), 2016-17 → 2025-26 : 254 885 lignes joueur-match, 100 % des 11 969 matchs couverts. Seuls les joueurs entrés en jeu y figurent (absence = pas de ligne). Accessible depuis le PC (même domaine `stats.nba.com` que `fetch_games.py`), donc pas depuis le VPS.
+- **Indicateur retenu `lineup_delta`** (calculable à 10 h avec le seul passé) : valeur d'un joueur = Game Score moyen (Hollinger : PTS + 0,4 FGM − 0,7 FGA − 0,4 (FTA − FTM) + 0,7 OREB + 0,3 DREB + STL + 0,7 AST + 0,7 BLK − 0,4 PF − TOV) sur ses 15 dernières apparitions strictement avant la date du match (toutes équipes, saisons précédentes comprises) ; force d'un effectif = somme des 8 meilleures valeurs parmi les joueurs d'un match (le top 8 neutralise les fins de match pliées) ; `lineup_delta` = force de l'effectif du DERNIER match de l'équipe − force moyenne de ses 10 derniers matchs de la saison (valeurs prises à la date du match cible). Hypothèse : les absents du dernier match le restent ; l'Elo et la forme reflètent l'effectif habituel. Premier match de la saison : 0. Ajouté en `diff_lineup_delta` aux 11 features. Distribution par équipe-match : médiane +0,1, écart-type 7,6 (unités de Game Score), de −64 à +40.
+- **Oracle** (borne haute, inutilisable : effectif réel du match lui-même, connu ~30 min avant) : même calcul avec les joueurs entrés en jeu. Corrélation proxy/oracle 0,42.
+- **Saisons de réglage** (LogReg, Δ log loss) : `gmsc:delta` −0,0022 [−0,0045 ; +0,0003] ; `gmsc:missing` (valeur des titulaires habituels, présents dans ≥ 50 % des 10 derniers matchs, absents du dernier, pondérée par leur taux de présence) −0,0022 [−0,0049 ; +0,0005] ; les deux −0,0023 ; mêmes calculs en minutes au lieu du Game Score −0,0019 / −0,0019 ; oracle Game Score −0,0091 [−0,0138 ; −0,0043], oracle minutes −0,0076. 7 variantes seulement, fixées à l'avance ; `gmsc:delta` choisi AVANT la confirmation (à égalité : une seule variable, symétrique).
+- **Confirmation (5 saisons)**, `gmsc:delta` : **LogReg −0,0023 [−0,0041 ; −0,0007], Brier −0,0011 [−0,0019 ; −0,0003], 4/5 saisons ; 2024-25 + 2025-26 −0,0025 [−0,0050 ; −0,0002], 2/2** ; accuracy +0,4 pt (bruit) ; ECE 0,014 → 0,010. XGBoost −0,0014 [−0,0027 ; −0,0002], 5/5 saisons. `--legacy` : LogReg 0,5922 → 0,5887 (accuracy 68,4 → 68,6 %), XGBoost 0,5912 → 0,5905. Pour mémoire : `gmsc:missing` −0,0026 [−0,0046 ; −0,0007] (2024-26 −0,0031) ; oracle −0,0082 [−0,0117 ; −0,0049] (2024-26 −0,0070). Coefficient LogReg (standardisé, tout l'historique) : +0,14, signe attendu.
+- **Contrôles** : fuite (retirer les joueurs d'un match ne change pas l'indicateur de ce match, change celui du suivant, 5 matchs de 2022-23 : OK) ; gain réparti sur la saison (oct-déc −0,0021, jan-fév −0,0023, mars-avr −0,0026 : pas seulement les mises au repos de fin de saison) ; concentré sur les matchs où l'effectif a changé (|diff| ≥ 10, 1/3 des matchs : −0,0075 [−0,0121 ; −0,0029] ; ailleurs +0,0004, bruit). Limite visible : DEN le 2026-01-07, delta −48,6 (absents au match précédent) mais oracle −0,8 (ils sont revenus).
+- **Verdict : GO pour la version « matchs passés »** (règle remplie, gain qui tient sur les saisons non vues). La version « rapport officiel des blessures » viserait au mieux l'écart à l'oracle (−0,006 de plus), mais ce rapport (PDF, mis à jour jusqu'au soir du match) n'est pas exploitable à 10 h de façon fiable : non essayée.
+- **Intégration (FAITE le 2026-10-19, accord de l'utilisateur)** :
+  - `data/collectors/fetch_player_logs.py` (nouveau) : `LeagueGameLog` par saison → `data/raw/player_games_raw.csv` (23 Mo, 255 086 lignes, colonnes utiles seulement, non versionné), cache + `--refresh` (même règle que `fetch_games.py`, dont il importe `all_seasons`), écriture atomique. Saison sans match (2026-27 aujourd'hui) : 0 ligne, pas d'erreur.
+  - `data/preprocessing/player_games.py` (nouveau) : `load_player_games()` (colonnes en minuscules, `nba_game_id` entier), `restrict_to_games()` (lignes des seuls matchs de `games_clean.csv`, date du match : un historique tronqué à une date ne voit rien après), `coverage_warning()`.
+  - `features_lib.py` : `PLAYER_VALUE_GAMES` 15, `LINEUP_WINDOW` 10, `LINEUP_TOP` 8, `game_score()`, `player_value_timeline()`, `lineup_strength()`, `lineup_delta(strengths)` (version une équipe, API) et `compute_lineup_deltas()` (batch vectorisé, ~5 s) ; famille « Effectif » (`lineup`) dans `FACTOR_FAMILIES`.
+  - `feature_engineering.build_features(df_games, player_games)` (2ᵉ argument obligatoire) : `home/away/diff_lineup_delta` ; `train_model.FEATURE_PATTERNS` + `lineup_delta` → **12 features**.
+  - `team_state.json` : `teams[id].lineup = {strengths (10 derniers effectifs de la saison, valeurs des joueurs à ce jour, flottants non arrondis), absent [{player_id, name, value, games, of}]}` ; `build_team_state(df_games, player_games)`.
+  - `predictor_service.py` : `lineup_delta` = `features_lib.lineup_delta(strengths)`, 0 pour un match d'une saison postérieure (comme à l'entraînement) ou si `team_state.json` n'a pas le champ (avertissement dans le journal : « relancer sync_to_vps.ps1 ») ; `team_snapshot()` → `absent_players` (vide en nouvelle saison) ; `/games/{id}` le renvoie par équipe.
+  - `check_features.py` : feuilles joueur passées partout ; nouveau contrôle 3 (meilleur joueur retiré de la feuille de 5 matchs : rien ne change avant/pendant, `lineup_delta` du match suivant change). Vérifié capable d'échouer (fuite injectée : valeur des joueurs incluant le match lui-même → ÉCHEC). Le contrôle 1 a attrapé un vrai bug en cours de route (effectifs regroupés par match et non par (équipe, match) dans `team_state.py`). Durée totale ~75 s (au lieu de ~15 s).
+  - `sync_to_vps.ps1` : étape « Feuilles de match joueur » (`fetch_player_logs.py --refresh`) après `fetch_games.py --refresh` (BOM conservé).
+  - Front : ligne « Effectif au dernier match, vs habituel » dans `ComparisonBars` (domaine −30 → +10) ; section « Absents au dernier match » dans `MatchView` (masquée si les deux listes sont vides) ; puce « À savoir » sur la limite (retours de blessure, forfaits de dernière minute) ; textes de `ModelView` (en-tête, « Ce qui compte le plus », « Les limites »). README et `docs/architecture.md` (section « Les absences ») à jour.
+- **Résultats de la version intégrée** (`oof_lineup.csv`, désormais LA RÉFÉRENCE) : LogReg 66,1 % / log loss 0,6141 / Brier 0,2128 / ECE 0,010 ; XGBoost 65,7 % / 0,6180 ; Elo seul inchangé 0,6184. Contre `history_hl2` : LogReg −0,0023 [−0,0040 ; −0,0006], Brier −0,0011, 4/5 ; XGBoost −0,0015 [−0,0028 ; −0,0002], 5/5. **LogReg − Elo seul : −0,0042 [−0,0070 ; −0,0015], 5/5 saisons** (dans le bruit avant). `--legacy` : LogReg 0,5888 / 68,6 %, XGBoost 0,5908. Poids par famille : Elo 58,9 %, forme 12,8 %, **effectif 10,9 %**, repos 7,9 %, attaque 4,3 %, dom./ext. 4,0 %, bilan 1,3 %. Coefficient standardisé de `diff_lineup_delta` +0,139. σ du score 12,74 ; MAE par équipe 9,27.
+- Écarts avec le banc d'essai (491 matchs, expliqués) : une ligne joueur ajoutée par la NBA depuis l'essai (Schröder, 0 min, 2022-11-06), et les 10 matchs sur terrain neutre absents de `games_clean.csv` (voir ci-dessous), que l'essai comptait dans la valeur des joueurs et plus la version intégrée (cohérent avec l'Elo).
+- **Découverte, NON traitée** : `fetch_games.recombine_games()` écarte les matchs sur terrain neutre (NBA Cup à Las Vegas, Paris, Mexico, Berlin, Londres : `MATCHUP` en « @ » pour les deux équipes) : 10 matchs depuis 2024-25 absents de tout l'historique (Elo, forme, entraînement). Piste : un domicile conventionnel.
+- Prédictions réelles (calendrier, matchs du 2026-10-22, nouvelle saison donc `lineup_delta` = 0) : PHI–CLE 49,3 % → 50,4 %, OKC–DEN 65,8 % → 66,0 % (changement du seul réentraînement). L'indicateur n'agira qu'à partir du 2ᵉ match de chaque équipe en 2026-27.
+- Vérifié : `check_features.py` (tout OK), routeurs appelés directement (`/games/today` 2026-10-22 et 2026-04-08, `/games/{id}` : biais + facteurs = logit(p) à 2e-4, facteur « Effectif » présent), `npm run lint`, `npm run build`, captures Chrome headless 1280 px de la fiche match CLE–ATL du 2026-04-08 (absents des deux côtés) et de la page modèle (sombre). **Non vérifié** : affichage 375 px et thème clair de la nouvelle section, `sync_to_vps.ps1` réel (seul le collecteur a été lancé à la main, avec et sans `--refresh`).
+- **Déployé le 2026-10-19** (21:20, commit `513470a`) avec `deploy_to_vps.ps1`, puis `sync_to_vps.ps1` 1 min après (première synchro réelle avec l'étape « Feuilles de match joueur » : OK ; scp affiche « close - IO is still pending on closed socket », sans effet, code de sortie 0). Vérifié en production : `/api/model/metrics` (LogReg 0,6141, « Effectif » 10,9 %), prédictions du 2026-10-22 identiques au local (PHI–CLE 50,4 % → 119–118, OKC–DEN 66,0 % → 124–118), `/games/{id}` avec `absent_players` et biais + facteurs = logit(p), pages `/`, `/modele`, `/match` en 200, `team_state.json` du VPS avec `lineup` pour les 30 équipes, mémoire 139 Mo. Journal : un seul avertissement « team_state.json sans données d'effectif » au redémarrage (avant la synchro, attendu), plus rien après.
+- Ordre pour tout futur changement de l'effectif : `deploy_to_vps.ps1` puis immédiatement `sync_to_vps.ps1` (entre les deux, `lineup_delta` = 0 et avertissement, pas de plantage).
+- **Commits** : `669d6f4` (pipeline + API + synchro), `44840b5` (front), `21ff3b1` (docs), `513470a` : suppression des 4 fichiers vides de l'API (`routers/players.py`, `predictions.py`, `teams.py`, `services/nba_sync_service.py`, supprimés par l'utilisateur avant la session et jamais importés) — nécessaire, car `deploy_to_vps.ps1` copie les fichiers de `git ls-files` et échouait sur des fichiers suivis mais absents.
+
 ## Déploiement (VPS personnel, en ligne depuis le 2026-10-14)
 
 **En ligne : https://nba.remicoimbra.fr.** Guide d'exploitation (redéployer, retour arrière, surveiller, installation initiale) : `docs/deploiement.md`. Le dépôt GitHub est **public** : ne rien y écrire sur les autres services/projets hébergés sur le VPS.
@@ -720,11 +762,11 @@ docker run --rm python:3.12-slim sh -c "pip install -q nba_api && python -c \"fr
 ## Prochaines étapes (à faire)
 
 0. ~~**Déploiement sur le VPS**~~ : FAIT le 2026-10-14 (voir "Déploiement"). Reste côté utilisateur : la tâche planifiée de la synchro.
-1. ~~`nba_sync_service.py`~~ : **remplacé** par `infra/sync_to_vps.ps1` (la synchro ne peut pas tourner dans l'API sur le VPS, NBA bloquée). `api/app/services/nba_sync_service.py` reste un fichier vide, à supprimer. `POST /admin/sync/games` n'a plus lieu d'être sous cette forme.
-2. **Finir le refactor API** : `routers/predictions.py`, `routers/teams.py`, `routers/players.py` sont toujours des fichiers vides — seul `routers/games.py` a une vraie logique pour l'instant.
+1. ~~`nba_sync_service.py`~~ : **remplacé** par `infra/sync_to_vps.ps1` (la synchro ne peut pas tourner dans l'API sur le VPS, NBA bloquée). `api/app/services/nba_sync_service.py` (vide) supprimé le 2026-10-19. `POST /admin/sync/games` n'a plus lieu d'être sous cette forme.
+2. **Finir le refactor API** : `routers/predictions.py`, `routers/teams.py`, `routers/players.py` n'existent plus (fichiers vides supprimés le 2026-10-19) ; seuls `routers/games.py` et `routers/model.py` existent. À créer si les endpoints cibles deviennent utiles.
 3. **Choix et setup de la BDD** : décider entre PostgreSQL local ou Supabase, créer les tables du schéma (à mettre à jour avec les vraies colonnes : Elo, Net Rating, win_pct_context...). `team_state.json` fait office de solution transitoire correcte pour l'instant.
 4. Tester `/games/today` (et le sélecteur de date du front) avec de VRAIS matchs programmés dès le retour de la saison régulière NBA (mi-octobre 2026) — jusque-là, le paramètre `?date=` ne permet qu'un test partiel (Elo/forme actuels appliqués à une date passée, voir limite documentée dans "Adaptation front" plus haut).
-5. **Amélioration des prédictions** : plan en 6 étapes, étapes 1 (walk-forward) et 2 (Elo) FAITES et déployées le 2026-10-19, étape 3 (modèle, LogReg servie) FAITE et déployée le 2026-10-19, étape 5 (score) et historique étendu FAITS et déployés le 2026-10-19, étape 4 (calendrier) essayée et NON ADOPTÉE le 2026-10-19 ; suite = étape 6 (blessures : essai court puis go/no-go), à comparer à `oof_history_hl2.csv`, voir "Amélioration des prédictions". Hors plan, toujours possible : affiner le Net Rating (ratio de sommes plutôt que moyenne de ratios).
+5. **Amélioration des prédictions** : plan en 6 étapes, étapes 1 (walk-forward) et 2 (Elo) FAITES et déployées le 2026-10-19, étape 3 (modèle, LogReg servie) FAITE et déployée le 2026-10-19, étape 5 (score) et historique étendu FAITS et déployés le 2026-10-19, étape 4 (calendrier) essayée et NON ADOPTÉE le 2026-10-19 ; étape 6 (blessures) essayée, concluante, intégrée et déployée le 2026-10-19 ; plan terminé. À surveiller dès le 2ᵉ match de chaque équipe en 2026-27 (premier usage réel de l'effectif). Nouvelle référence pour de futurs essais : `oof_lineup.csv`. Piste repérée : matchs sur terrain neutre absents de l'historique (voir "Étape 6"), voir "Amélioration des prédictions". Hors plan, toujours possible : affiner le Net Rating (ratio de sommes plutôt que moyenne de ratios).
 6. ~~Dockeriser l'API~~ : abandonné, l'API tourne en service systemd isolé (voir "Déploiement").
 7. ~~Sortir la config en dur~~ : FAIT (`NEXT_PUBLIC_API_URL` au build, `NBA_CORS_ORIGINS` et `NBA_API_DOCS` dans `config.py`).
 8. ~~(Optionnel, UX) skeleton de chargement~~ : fait avec la refonte UI.
@@ -772,6 +814,7 @@ $env:NEXT_PUBLIC_API_URL = "http://127.0.0.1:8001"; npm run dev   # dans front/
 ```powershell
 cd data
 python collectors\fetch_games.py          # réutilise le brut existant si présent
+python collectors\fetch_player_logs.py    # feuilles de match par joueur (effectif), idem
 python preprocessing\clean_data.py
 python preprocessing\feature_engineering.py
 python models\train_model.py             # walk-forward (~20 s) + score prédit + modèles servis + model_metrics.json
@@ -788,8 +831,8 @@ python models\evaluate_model.py --variant essai --compare baseline   # après mo
 python models\evaluate_model.py --legacy                        # ancien découpage (test 2025-26)
 python models\tune_elo.py                                       # grille des paramètres Elo (~30 s), ne modifie rien
 # --variant baseline (aussi la valeur par défaut) réécrit oof_baseline.csv (état d'avant l'étape 2) : nommer autrement un essai
-# référence de l'état actuel (historique 2016-17 + poids par saison) : oof_history_hl2.csv -> --variant essai --compare history_hl2
-python preprocessing\check_features.py                          # cohérence entraînement/API + absence de fuite (~15 s)
+# référence de l'état actuel (étape 6, effectif) : oof_lineup.csv -> --variant essai --compare lineup
+python preprocessing\check_features.py                          # cohérence entraînement/API + absence de fuite (~75 s)
 ```
 
 Sous Git Bash, préfixer par `PYTHONIOENCODING=utf-8` (sinon accents illisibles dans la console).
