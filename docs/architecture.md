@@ -216,4 +216,5 @@ Si les fichiers deviennent insuffisants : PostgreSQL local (conteneur Docker). T
 | 11 variables seulement (écarts + Elo) | Les 20 autres colonnes n'aidaient aucun modèle et gênaient la régression logistique ; elles restent affichées sur la fiche match |
 | Historique depuis 2016-17, saisons pondérées (demi-vie 2) | Plus de données, sans que l'avantage du terrain plus fort de 2016-19 ne biaise le modèle ; ni l'un ni l'autre ne suffisait seul |
 | Écart du score déduit de la probabilité | Erreur plus faible que l'ancienne méthode, et le score ne contredit jamais le favori ; la régression du total n'apportait rien |
-| Pistes (plan du 2026-10-19) | Fatigue et déplacements, joueurs absents |
+| Pas de variables de fatigue ni de déplacement | Matchs des 4 derniers jours, distance parcourue et décalage horaire essayés (2026-10-19) : aucun gain qui tienne sur les saisons non utilisées pour le réglage ; les jours de repos captent déjà les back-to-back |
+| Piste restante (plan du 2026-10-19) | Joueurs absents |
