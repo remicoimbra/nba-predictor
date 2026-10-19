@@ -430,9 +430,11 @@ def main():
     print(f"Prédictions sauvegardées : {save_oof(oof, args.variant)}\n")
     print_report(oof, keys)
 
-    print("\nComparaison appariée, A = xgboost, B = logreg :")
-    for metric in ("log_loss", "brier", "accuracy"):
-        print("  " + format_comparison(paired_compare(oof, "xgboost", oof, "logreg", metric)))
+    served = train_model.SERVED_MODEL
+    for other in (s.key for s in specs if s.key != served):
+        print(f"\nComparaison appariée, A = {served}, B = {other} :")
+        for metric in ("log_loss", "brier", "accuracy"):
+            print("  " + format_comparison(paired_compare(oof, served, oof, other, metric)))
 
     if args.compare:
         reference = load_oof(args.compare)

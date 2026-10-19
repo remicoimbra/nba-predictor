@@ -7,7 +7,8 @@ away_team_id), à partir de :
   forme récente, résultats de la saison) — voir data/preprocessing/team_state.py
 - data/preprocessing/features_lib.py : mêmes formules que celles utilisées
   à l'entraînement (Elo, rolling stats, win%) — source de vérité partagée
-- data/models/saved_models/xgboost_v1.pkl : modèle entraîné
+- data/models/saved_models/logreg.pkl : modèle entraîné (régression
+  logistique, voir train_model.py pour le choix du modèle servi)
 - data/models/saved_models/feature_columns.json : ordre exact des colonnes
   attendu par le modèle (généré par train_model.py)
 
@@ -17,7 +18,7 @@ match demandé, à partir de l'état déjà résumé dans team_state.json — pa
 besoin de recharger 8000+ matchs à chaque requête.
 
 Point d'attention (cf. CLAUDE.md) : team_state.json doit être régénéré
-régulièrement (nba_sync_service.py, job quotidien) pour rester à jour.
+régulièrement (infra/sync_to_vps.ps1, synchro quotidienne) pour rester à jour.
 Une prédiction faite avec un team_state.json périmé utilisera l'Elo/la
 forme d'il y a plusieurs jours.
 """
@@ -31,7 +32,6 @@ from typing import Any, Optional
 
 import joblib
 import pandas as pd
-import xgboost as xgb
 
 # --- Rendre features_lib.py importable depuis l'API sans dupliquer le code ---
 # api/ et data/ sont deux dossiers frères du projet : plutôt que de copier
@@ -56,7 +56,9 @@ from features_lib import (  # type: ignore[import-not-found]  # noqa: E402
     ROLLING_WINDOWS,
     elo_expected_home,
     elo_for_target_season,
+    factor_family,
     is_later_season,
+    linear_contributions,
     net_rtg_from_boxscore,
     rest_days,
     rolling_mean_last_n,
@@ -67,33 +69,9 @@ from features_lib import (  # type: ignore[import-not-found]  # noqa: E402
 logger = logging.getLogger(__name__)
 
 TEAM_STATE_PATH = DATA_DIR / "processed" / "team_state.json"
-MODEL_PATH = DATA_DIR / "models" / "saved_models" / "xgboost_v1.pkl"
+MODEL_PATH = DATA_DIR / "models" / "saved_models" / "logreg.pkl"
 FEATURE_COLUMNS_PATH = DATA_DIR / "models" / "saved_models" / "feature_columns.json"
 MODEL_METRICS_PATH = DATA_DIR / "models" / "saved_models" / "model_metrics.json"
-
-
-# Familles de features pour expliquer une prédiction : les contributions
-# XGBoost des colonnes home_/away_/diff_ d'une même famille sont sommées.
-# Ordre important : un motif plus spécifique (win_pct_context) doit passer
-# avant le motif générique (win_pct) qu'il contient.
-FACTOR_FAMILIES = [
-    ("elo", "Rating Elo", ("elo",)),
-    ("context", "Bilan domicile / extérieur", ("win_pct_context",)),
-    ("form", "Forme (10 derniers matchs)", ("win_pct_last10",)),
-    ("season", "Bilan de la saison", ("win_pct",)),
-    ("net_rtg", "Net Rating récent", ("net_rtg_last",)),
-    ("offense", "Attaque récente", ("avg_pts_scored_last",)),
-    ("defense", "Défense récente", ("avg_pts_allowed_last",)),
-    ("rest", "Jours de repos", ("rest_days",)),
-]
-
-
-def _factor_family(column: str) -> tuple[str, str]:
-    base = column.split("_", 1)[1]  # retire home_/away_/diff_
-    for key, label, patterns in FACTOR_FAMILIES:
-        if any(base.startswith(p) for p in patterns):
-            return key, label
-    return "other", "Autres"
 
 
 class PredictorNotReadyError(RuntimeError):
@@ -139,8 +117,8 @@ class PredictorService:
         self.team_state_path = team_state_path
         self.feature_columns_path = feature_columns_path
         self.model_metrics_path = model_metrics_path
-        # Typé Any plutôt que None : le modèle chargé (XGBClassifier via
-        # joblib) n'a pas de type statique connu de Pylance ici, et un
+        # Typé Any plutôt que None : le modèle chargé (Pipeline scikit-learn
+        # via joblib) n'a pas de type statique connu de Pylance ici, et un
         # attribut initialisé à None sans annotation ferait inférer
         # "toujours None" au vérificateur de type, qui refuserait alors
         # tout appel de méthode dessus (ex: predict_proba) même après un
@@ -266,10 +244,10 @@ class PredictorService:
         pipeline batch (features_lib.py), appliquées à l'état résumé de
         team_state.json plutôt qu'à l'historique complet.
 
-        Valeurs manquantes (ex: équipe en tout début de saison, moins de
-        5 matchs joués) : on laisse `None` -> converti en NaN plus bas.
-        XGBoost gère nativement les NaN (pas besoin d'imputer une valeur
-        arbitraire qui biaiserait la prédiction).
+        Valeurs manquantes (ex: win_pct avant le premier match de la
+        saison) : on laisse `None` -> converti en NaN plus bas, puis
+        remplacé par le modèle lui-même (médiane de l'entraînement, voir
+        train_model.make_logreg), comme pendant l'évaluation.
         """
         recent = team["recent_games"]  # déjà limité à 10, plus ancien -> plus récent
         pts_scored = [g["pts_scored"] for g in recent]
@@ -379,15 +357,16 @@ class PredictorService:
 
     def _factors(self, X: pd.DataFrame) -> tuple[list, float]:
         """
-        Contributions de chaque feature à CETTE prédiction (valeurs de type
-        SHAP calculées par XGBoost, en log-odds, dont la somme + le biais
-        redonne exactement la sortie du modèle), regroupées par famille.
+        Contributions de chaque feature à CETTE prédiction (coefficient de la
+        régression logistique × valeur standardisée, en log-odds : le biais
+        + leur somme redonne exactement la sortie du modèle), regroupées par
+        famille. Une contribution > 0 favorise l'équipe à domicile, par
+        rapport à un match « moyen » de l'entraînement.
         """
-        contribs = self._model.get_booster().predict(xgb.DMatrix(X), pred_contribs=True)[0]
-        base_value = float(contribs[-1])  # dernière colonne = biais
+        contribs, base_value = linear_contributions(self._model, X)
         totals: dict = {}
-        for column, value in zip(self._feature_columns, contribs[:-1]):
-            key, label = _factor_family(column)
+        for column, value in zip(self._feature_columns, contribs[0]):
+            key, label = factor_family(column)
             entry = totals.setdefault(key, {"key": key, "label": label, "contribution": 0.0})
             entry["contribution"] += float(value)
         factors = sorted(totals.values(), key=lambda f: abs(f["contribution"]), reverse=True)
@@ -414,8 +393,8 @@ class PredictorService:
             )
 
         # astype(float) : convertit les None en NaN. Sans ça, une colonne
-        # dont la seule valeur est None est typée "object" et XGBoost refuse
-        # le DataFrame (cas réel : win_pct en tout début de saison).
+        # dont la seule valeur est None est typée "object" et le modèle
+        # refuse le DataFrame (cas réel : win_pct en tout début de saison).
         X = pd.DataFrame(
             [[row[c] for c in self._feature_columns]], columns=self._feature_columns
         ).astype(float)

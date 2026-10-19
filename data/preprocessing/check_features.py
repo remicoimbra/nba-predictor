@@ -5,6 +5,10 @@ Contrôles automatiques du pipeline de features, à relancer après toute
 modification de features_lib.py, feature_engineering.py, team_state.py ou
 predictor_service.py :
 
+Les contrôles portent sur TOUTES les features calculées
+(train_model.candidate_feature_cols : celles que l'API affiche sur la fiche
+match), pas seulement sur celles du modèle (feature_columns.json).
+
 0. game_features.csv est à jour : identique aux features recalculées à
    partir de games_clean.csv avec le code actuel (sinon train_model.py
    s'entraîne sur d'anciennes features).
@@ -14,7 +18,9 @@ predictor_service.py :
    (PredictorService.build_feature_row). Elles doivent être identiques à
    celles du pipeline d'entraînement. Les 10 premiers matchs de la saison
    sont toujours inclus : ils passent par le changement de saison
-   (régression Elo, bilans remis à zéro).
+   (régression Elo, bilans remis à zéro). Pour ces mêmes matchs,
+   l'explication servie doit être exacte : biais + somme des facteurs =
+   logit de la probabilité (à l'arrondi de l'API près).
 2. Absence de fuite temporelle : on inverse le résultat d'un match (scores
    et boxscores échangés) et on recalcule toutes les features. Celles de ce
    match et des matchs antérieurs ne doivent pas bouger ; celles des matchs
@@ -27,6 +33,7 @@ Code de sortie 1 si un contrôle échoue.
 """
 
 import json
+import math
 import sys
 import tempfile
 from pathlib import Path
@@ -39,12 +46,16 @@ from team_state import build_team_state
 
 DATA_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(DATA_DIR.parent / "api"))
+sys.path.insert(0, str(DATA_DIR / "models"))
 from app.services.predictor_service import FEATURE_COLUMNS_PATH, PredictorService  # noqa: E402
+from train_model import candidate_feature_cols  # noqa: E402
 
 CLEAN_PATH = DATA_DIR / "processed" / "games_clean.csv"
 FEATURES_PATH = DATA_DIR / "processed" / "game_features.csv"
 
 TOLERANCE = 1e-9
+# Facteurs, biais et probabilité sont arrondis à 4 décimales par l'API.
+EXPLANATION_TOLERANCE = 1e-3
 SEASON_START_GAMES = 10  # premiers matchs de la saison, toujours contrôlés
 RANDOM_GAMES = 40
 LEAK_GAMES = 5
@@ -61,7 +72,7 @@ def differing_columns(row_a, row_b, columns) -> list[str]:
     return [c for c in columns if not same_value(row_a[c], row_b[c])]
 
 
-def check_features_file_up_to_date(batch: pd.DataFrame, columns: list[str]) -> bool:
+def check_features_file_up_to_date(batch: pd.DataFrame, columns: list[str], model_columns: list[str]) -> bool:
     saved = pd.read_csv(FEATURES_PATH, parse_dates=["game_date"]).set_index("nba_game_id")
     fresh = batch.set_index("nba_game_id")
     if set(saved.index) != set(fresh.index):
@@ -71,6 +82,10 @@ def check_features_file_up_to_date(batch: pd.DataFrame, columns: list[str]) -> b
     if missing:
         print(f"  ÉCHEC : colonnes absentes de game_features.csv : {missing}")
         return False
+    unknown = [c for c in model_columns if c not in columns]
+    if unknown:
+        print(f"  ÉCHEC : colonnes de feature_columns.json inconnues du pipeline : {unknown} (relancer train_model.py)")
+        return False
     a = saved.loc[fresh.index, columns].to_numpy(dtype=float)
     b = fresh[columns].to_numpy(dtype=float)
     mismatch = ~(np.isclose(a, b, rtol=0, atol=TOLERANCE) | (np.isnan(a) & np.isnan(b)))
@@ -78,7 +93,7 @@ def check_features_file_up_to_date(batch: pd.DataFrame, columns: list[str]) -> b
         cols = [columns[j] for j in np.where(mismatch.any(axis=0))[0]]
         print(f"  ÉCHEC : {int(mismatch.any(axis=1).sum())} matchs diffèrent ({cols[:5]}...) : relancer feature_engineering.py")
         return False
-    print(f"  OK : {len(fresh)} matchs, {len(columns)} features identiques")
+    print(f"  OK : {len(fresh)} matchs, {len(columns)} features identiques (dont les {len(model_columns)} du modèle)")
     return True
 
 
@@ -94,6 +109,7 @@ def check_train_live_consistency(clean: pd.DataFrame, batch: pd.DataFrame, colum
     batch_rows = batch.set_index("nba_game_id")
 
     failures = []
+    worst_gap = 0.0  # écart max |biais + somme des facteurs - logit(p)|
     with tempfile.TemporaryDirectory() as tmp:
         state_path = Path(tmp) / "team_state.json"
         service = None
@@ -107,21 +123,33 @@ def check_train_live_consistency(clean: pd.DataFrame, batch: pd.DataFrame, colum
                 service.reload_team_state()
 
             for game in day_games.itertuples():
-                live = service.build_feature_row(
-                    int(game.home_team_id), int(game.away_team_id), as_of_date=game_date.strftime("%Y-%m-%d")
-                )
+                teams = (int(game.home_team_id), int(game.away_team_id))
+                as_of = game_date.strftime("%Y-%m-%d")
+                live = service.build_feature_row(*teams, as_of_date=as_of)
                 absent = [c for c in columns if c not in live]
                 diff = absent or differing_columns(live, batch_rows.loc[game.nba_game_id], columns)
                 if diff:
                     failures.append((game.nba_game_id, game_date.date(), diff))
 
+                pred = service.predict(*teams, as_of_date=as_of)
+                p = pred.home_win_probability
+                explained = pred.base_value + sum(f["contribution"] for f in pred.factors)
+                worst_gap = max(worst_gap, abs(explained - math.log(p / (1 - p))))
+
+    ok = True
     if failures:
         print(f"  ÉCHEC : {len(failures)} matchs sur {len(sample)} diffèrent entre entraînement et API")
         for game_id, day, cols in failures[:5]:
             print(f"    {game_id} ({day}) : {cols}")
-        return False
-    print(f"  OK : {len(sample)} matchs de {season} ({sample['game_date'].nunique()} journées), features identiques à {TOLERANCE}")
-    return True
+        ok = False
+    else:
+        print(f"  OK : {len(sample)} matchs de {season} ({sample['game_date'].nunique()} journées), features identiques à {TOLERANCE}")
+    if worst_gap > EXPLANATION_TOLERANCE:
+        print(f"  ÉCHEC : biais + facteurs s'écartent du logit de la probabilité servie (jusqu'à {worst_gap:.4f})")
+        ok = False
+    else:
+        print(f"  OK : biais + facteurs = logit(p) pour ces matchs (écart max {worst_gap:.1e}, arrondis de l'API)")
+    return ok
 
 
 def flipped_result(clean: pd.DataFrame, game_id) -> pd.DataFrame:
@@ -177,11 +205,12 @@ def check_no_leakage(clean: pd.DataFrame, batch: pd.DataFrame, columns: list[str
 def main():
     clean = pd.read_csv(CLEAN_PATH, parse_dates=["game_date"])
     with open(FEATURE_COLUMNS_PATH, encoding="utf-8") as f:
-        columns = json.load(f)
+        model_columns = json.load(f)
     batch = build_features(clean)
+    columns = candidate_feature_cols(batch)
 
     print("0. game_features.csv à jour")
-    results = [check_features_file_up_to_date(batch, columns)]
+    results = [check_features_file_up_to_date(batch, columns, model_columns)]
     print("1. Cohérence entraînement / prédiction")
     results.append(check_train_live_consistency(clean, batch, columns))
     print("2. Absence de fuite temporelle")

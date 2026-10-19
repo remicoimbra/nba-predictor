@@ -304,3 +304,53 @@ def net_rtg_from_boxscore(pts_scored: float, pts_allowed: float, fga: float, ore
     off_rtg = 100 * pts_scored / poss
     def_rtg = 100 * pts_allowed / poss
     return off_rtg - def_rtg
+
+
+# ---------------------------------------------------------------------------
+# Explication des prédictions — partagée entre train_model.py (importance
+# globale de chaque famille) et predictor_service.py (facteurs d'un match)
+# ---------------------------------------------------------------------------
+
+# Familles de features : les contributions des colonnes home_/away_/diff_
+# d'une même famille sont sommées. Ordre important : un motif plus
+# spécifique (win_pct_context, win_pct_last10) doit passer avant le motif
+# générique (win_pct) qu'il contient.
+FACTOR_FAMILIES = [
+    ("elo", "Rating Elo", ("elo",)),
+    ("context", "Bilan domicile / extérieur", ("win_pct_context",)),
+    # Bilan des 10 derniers matchs et Net Rating récent dans la même famille :
+    # très corrélés (0,88), la régression logistique se partage leur effet
+    # commun de façon instable (coefficient du bilan récent de +0,04 à -0,13
+    # selon les saisons d'entraînement, en miroir de celui du Net Rating).
+    # Séparés, ils donneraient des facteurs de signes opposés difficiles à lire.
+    ("form", "Forme récente", ("win_pct_last10", "net_rtg_last")),
+    ("season", "Bilan de la saison", ("win_pct",)),
+    ("offense", "Attaque récente", ("avg_pts_scored_last",)),
+    ("defense", "Défense récente", ("avg_pts_allowed_last",)),
+    ("rest", "Jours de repos", ("rest_days",)),
+]
+
+
+def factor_family(column: str) -> tuple[str, str]:
+    """(clé, libellé) de la famille d'une colonne de feature."""
+    base = column.split("_", 1)[1]  # retire home_/away_/diff_
+    for key, label, patterns in FACTOR_FAMILIES:
+        if any(base.startswith(p) for p in patterns):
+            return key, label
+    return "other", "Autres"
+
+
+def linear_contributions(model, X: pd.DataFrame) -> tuple[np.ndarray, float]:
+    """
+    Contributions exactes de chaque feature à la sortie d'une régression
+    logistique (Pipeline imputer -> scaler -> clf de train_model.make_logreg),
+    en log-odds : coefficient × valeur standardisée, valeur manquante
+    remplacée comme à la prédiction. Biais + somme des contributions d'un
+    match = logit de sa probabilité de victoire à domicile. Une contribution
+    nulle correspond à la valeur moyenne de l'entraînement.
+
+    Retourne (contributions de forme (n_matchs, n_features), biais).
+    """
+    z = model.named_steps["scaler"].transform(model.named_steps["imputer"].transform(X))
+    clf = model.named_steps["clf"]
+    return z * clf.coef_[0], float(clf.intercept_[0])

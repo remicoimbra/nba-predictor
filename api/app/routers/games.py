@@ -229,7 +229,7 @@ def get_game(
     ),
 ):
     """
-    Fiche complète d'un match : prédiction + facteurs (contributions XGBoost
+    Fiche complète d'un match : prédiction + facteurs (contributions du modèle
     regroupées par famille), proba Elo seule, stats des deux équipes, 10
     derniers matchs, évolution Elo. 404 si le match est introuvable.
     """
