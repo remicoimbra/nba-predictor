@@ -27,8 +27,8 @@ export default function ModelView() {
         </h1>
         <p className="mt-3 text-text-2">
           Une régression logistique prédit si l&apos;équipe à domicile gagne, à
-          partir des écarts entre les deux équipes (Elo, forme, repos…)
-          calculés avant chaque match. Elle a été préférée à XGBoost, dont les
+          partir des écarts entre les deux équipes (Elo, forme, repos,
+          effectif…) calculés avant chaque match. Elle a été préférée à XGBoost, dont les
           probabilités sont moins fiables, et elle est comparée au rating Elo
           seul et à la règle naïve «&nbsp;le domicile gagne toujours&nbsp;».
         </p>
@@ -148,7 +148,7 @@ function ModelDetail({ m }) {
 
       <Card
         title="Ce qui compte le plus"
-        subtitle="Poids moyen de chaque famille de statistiques dans les prédictions (part du total). « Forme récente » réunit le bilan et le Net Rating des derniers matchs."
+        subtitle="Poids moyen de chaque famille de statistiques dans les prédictions (part du total). « Forme récente » réunit le bilan et le Net Rating des derniers matchs ; « Effectif » compare les joueurs du dernier match (Game Score des 8 meilleurs) à l'effectif habituel, pour repérer les absents."
       >
         <ImportanceBars metrics={m} />
       </Card>
@@ -197,8 +197,10 @@ function ModelDetail({ m }) {
               Les limites
             </h3>
             <p>
-              Le modèle ignore les blessures, les transferts et les matchs sans
-              enjeu. Environ un match sur trois reste mal prédit, et le score
+              Le modèle ne connaît les absences que par le dernier match joué
+              (pas par le rapport officiel des blessures), et ignore les
+              matchs sans enjeu. Environ un match sur trois reste mal prédit,
+              et le score
               estimé se trompe en moyenne de{" "}
               {scoreError ? `${num(scoreError)} points` : "plusieurs points"}{" "}
               par équipe.

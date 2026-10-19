@@ -12,7 +12,7 @@ import WinGauge from "@/components/charts/WinGauge";
 import { EmptyState, ErrorState, Loading } from "@/components/States";
 import { FormPills, PreseasonBadge, TeamBadge } from "@/components/TeamBits";
 import { EASE_OUT } from "@/lib/charts";
-import { int, localTime, longDate, record } from "@/lib/format";
+import { int, localTime, longDate, num, record } from "@/lib/format";
 import { useApi } from "@/lib/useApi";
 import { getGame } from "@/services/api";
 
@@ -182,11 +182,26 @@ function MatchDetail({ game }) {
         </Section>
       )}
 
+      {hasStats &&
+        (home.absent_players?.length > 0 ||
+          away.absent_players?.length > 0) && (
+          <Section
+            title="Absents au dernier match"
+            subtitle="Joueurs habituels (parmi les 8 meilleurs de l'équipe, entrés en jeu dans au moins la moitié des 10 derniers matchs) qui n'ont pas joué le dernier match. Le modèle les suppose encore absents."
+            index={2}
+          >
+            <div className="grid gap-6 md:grid-cols-2">
+              <AbsentList team={home} side="home" />
+              <AbsentList team={away} side="away" />
+            </div>
+          </Section>
+        )}
+
       {hasStats && (
         <Section
           title="Forme récente"
           subtitle="Écart de points sur les 10 derniers matchs : au-dessus de zéro, une victoire."
-          index={2}
+          index={3}
         >
           <div className="grid gap-8 md:grid-cols-2">
             <FormChart team={home} side="home" />
@@ -199,18 +214,23 @@ function MatchDetail({ game }) {
         <Section
           title="Évolution Elo"
           subtitle="Rating après chaque match. Plus il est haut, plus l'équipe est forte."
-          index={3}
+          index={4}
         >
           <EloLine home={home} away={away} />
         </Section>
       )}
 
-      <Section title="À savoir" index={4}>
+      <Section title="À savoir" index={5}>
         <ul className="list-disc space-y-2 pl-5 text-sm text-text-2">
           <li>
             Le modèle prédit uniquement le vainqueur. Le score est une
             estimation simple, tirée de l&apos;attaque et de la défense récentes
             des deux équipes.
+          </li>
+          <li>
+            Les absences sont déduites du dernier match joué, pas du rapport
+            officiel des blessures : un joueur qui revient ce soir est encore
+            compté absent, un forfait de dernière minute est ignoré.
           </li>
           {game.season_type === "preseason" && (
             <li>
@@ -234,6 +254,38 @@ function MatchDetail({ game }) {
           )}
         </ul>
       </Section>
+    </div>
+  );
+}
+
+function AbsentList({ team, side }) {
+  const players = team.absent_players ?? [];
+  return (
+    <div>
+      <p className="mb-3 flex items-center gap-2 text-sm font-semibold">
+        <span
+          aria-hidden="true"
+          className={`h-3 w-3 rounded-sm ${side === "home" ? "bg-home" : "bg-away"}`}
+        />
+        {team.name}
+      </p>
+      {players.length === 0 ? (
+        <p className="text-sm text-text-2">Aucun joueur habituel absent.</p>
+      ) : (
+        <ul className="divide-y divide-line rounded-xl border border-line">
+          {players.map((p) => (
+            <li
+              key={p.player_id}
+              className="flex items-baseline justify-between gap-3 px-3 py-2 text-sm"
+            >
+              <span className="font-semibold">{p.name}</span>
+              <span className="text-right text-text-2 tabular-nums">
+                Game Score {num(p.value)} · {p.games}/{p.of} matchs
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

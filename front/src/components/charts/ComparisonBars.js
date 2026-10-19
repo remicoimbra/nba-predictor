@@ -28,6 +28,13 @@ const METRICS = [
   },
   { key: "net_rtg_last10", label: "Net Rating (10 derniers)", domain: [-15, 15], format: (v) => signed(v) },
   {
+    key: "lineup_delta",
+    label: "Effectif au dernier match, vs habituel",
+    hint: "Game Score des 8 meilleurs",
+    domain: [-30, 10],
+    format: (v) => signed(v),
+  },
+  {
     key: "rest_days",
     label: "Jours de repos",
     domain: [0, 5],
