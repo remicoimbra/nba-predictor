@@ -5,10 +5,11 @@ import {
   AccuracyBars,
   CalibrationChart,
   ImportanceBars,
+  SeasonTable,
 } from "@/components/charts/ModelCharts";
 import { ErrorState, Loading } from "@/components/States";
 import { EASE_OUT } from "@/lib/charts";
-import { int, num, pct1 } from "@/lib/format";
+import { dec, num, pct1 } from "@/lib/format";
 import { useApi } from "@/lib/useApi";
 import { getModelMetrics } from "@/services/api";
 
@@ -58,8 +59,10 @@ function Card({ title, subtitle, children, className = "" }) {
 }
 
 function ModelDetail({ m }) {
-  const xgb = m.models.find((x) => x.key === "xgboost");
-  const gain = xgb.accuracy - m.baseline_accuracy;
+  const served = m.models.find((x) => x.key === m.served_model);
+  const gain = served.accuracy - m.baseline_accuracy;
+  const seasons = m.evaluation.test_seasons;
+  const period = `${seasons[0]} → ${seasons.at(-1)}`;
   const trainedAt = new Date(m.trained_at).toLocaleDateString("fr-FR", {
     day: "numeric",
     month: "long",
@@ -68,9 +71,9 @@ function ModelDetail({ m }) {
 
   const tiles = [
     {
-      label: "Accuracy XGBoost",
-      value: pct1(xgb.accuracy),
-      detail: `saison ${m.test_season}`,
+      label: `Accuracy ${served.name}`,
+      value: pct1(served.accuracy),
+      detail: `saisons ${period}`,
       hero: true,
     },
     {
@@ -80,13 +83,13 @@ function ModelDetail({ m }) {
     },
     {
       label: "Log loss",
-      value: xgb.log_loss.toFixed(3).replace(".", ","),
-      detail: "plus bas = mieux",
+      value: dec(served.log_loss),
+      detail: `plus bas = mieux (naïf : ${dec(m.baseline.log_loss)})`,
     },
     {
-      label: "Matchs de test",
-      value: int(m.test_games),
-      detail: `${int(m.train_games)} pour l'entraînement`,
+      label: "Score de Brier",
+      value: dec(served.brier),
+      detail: `plus bas = mieux (naïf : ${dec(m.baseline.brier)})`,
     },
   ];
 
@@ -117,7 +120,7 @@ function ModelDetail({ m }) {
       <div className="grid items-start gap-6 lg:grid-cols-2">
         <Card
           title="Précision"
-          subtitle={`Part des matchs de la saison ${m.test_season} dont le vainqueur est bien prédit.`}
+          subtitle={`Part des matchs des saisons ${period} dont le vainqueur est bien prédit.`}
         >
           <AccuracyBars metrics={m} />
         </Card>
@@ -128,6 +131,13 @@ function ModelDetail({ m }) {
           <CalibrationChart metrics={m} />
         </Card>
       </div>
+
+      <Card
+        title="Saison par saison"
+        subtitle="Chaque saison est prédite par un modèle entraîné uniquement sur les saisons précédentes. Log loss et Brier mesurent la qualité des probabilités : plus bas = mieux."
+      >
+        <SeasonTable metrics={m} />
+      </Card>
 
       <Card
         title="Ce qui compte le plus"
@@ -156,9 +166,10 @@ function ModelDetail({ m }) {
             </h3>
             <p>
               Toutes les statistiques sont calculées avec les seuls matchs joués{" "}
-              <u>avant</u> celui à prédire. Le modèle est entraîné sur les
-              saisons passées et testé sur la dernière saison complète (
-              {m.test_season}), qu&apos;il n&apos;a jamais vue.
+              <u>avant</u> celui à prédire. Chaque saison de {seasons[0]} à{" "}
+              {seasons.at(-1)} est prédite par un modèle qui ne l&apos;a jamais
+              vue, entraîné sur les saisons précédentes. Le modèle en ligne est
+              ensuite réentraîné sur toutes les saisons.
             </p>
           </div>
           <div>
@@ -168,7 +179,7 @@ function ModelDetail({ m }) {
             <p>
               Le modèle ignore les blessures, les transferts et les matchs sans
               enjeu. Il ne prédit que le vainqueur : le score affiché est une
-              estimation simple. Environ 3 matchs sur 10 restent mal prédits.
+              estimation simple. Environ un match sur trois reste mal prédit.
             </p>
           </div>
         </div>

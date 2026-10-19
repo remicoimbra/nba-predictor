@@ -13,6 +13,8 @@ export const pct = (p) => (p == null ? "—" : percentFmt.format(p));
 export const pct1 = (p) => (p == null ? "—" : percent1Fmt.format(p));
 export const num = (v) => (v == null ? "—" : numberFmt.format(v));
 export const int = (v) => (v == null ? "—" : intFmt.format(v));
+// Nombre de décimales fixe (log loss, Brier : 0,620).
+export const dec = (v, digits = 3) => (v == null ? "—" : v.toFixed(digits).replace(".", ","));
 export const signed = (v, digits = 1) =>
   v == null ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(digits).replace(".", ",")}`;
 

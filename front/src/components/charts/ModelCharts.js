@@ -5,7 +5,7 @@ import { useState } from "react";
 import DataTable from "@/components/charts/DataTable";
 import Tooltip from "@/components/charts/Tooltip";
 import { featureLabel, scaleLinear, useChartTransition, useWidth } from "@/lib/charts";
-import { int, pct, pct1 } from "@/lib/format";
+import { dec, int, pct, pct1 } from "@/lib/format";
 
 // Barres horizontales à une seule série. `highlight` : la barre mise en
 // avant (couleur d'accent), les autres restent neutres.
@@ -41,7 +41,7 @@ function HBars({ items, max, format, caption, columns }) {
 // partirait pas de zéro exagérerait les écarts).
 export function AccuracyBars({ metrics }) {
   const items = [
-    ...metrics.models.map((m) => ({ label: m.name, value: m.accuracy, highlight: m.key === "xgboost" })),
+    ...metrics.models.map((m) => ({ label: m.name, value: m.accuracy, highlight: m.key === metrics.served_model })),
     { label: "Baseline « le domicile gagne »", value: metrics.baseline_accuracy },
   ];
   return (
@@ -49,9 +49,63 @@ export function AccuracyBars({ metrics }) {
       items={items}
       max={1}
       format={pct1}
-      caption="Accuracy sur la saison de test"
+      caption="Accuracy sur les saisons de test"
       columns={["Modèle", "Accuracy"]}
     />
+  );
+}
+
+// Résultats de l'évaluation saison par saison pour le modèle en ligne : la
+// moyenne cache des écarts importants d'une saison à l'autre.
+export function SeasonTable({ metrics }) {
+  const key = metrics.served_model;
+  const served = metrics.models.find((m) => m.key === key);
+  const rows = metrics.evaluation.per_season.map((s) => ({ label: s.season, ...s.models[key] }));
+  // Sur mobile : marges réduites et colonne « Matchs » masquée (≈ 1 230
+  // partout), pour que les 4 autres colonnes tiennent sans défilement.
+  const cell = "px-2 py-1.5 sm:px-3";
+  const games = `${cell} hidden sm:table-cell`;
+  return (
+    <div className="overflow-x-auto rounded-lg border border-line">
+      <table className="w-full text-left text-sm tabular-nums">
+        <caption className="sr-only">Résultats du modèle {served.name} par saison de test</caption>
+        <thead className="bg-surface text-text-2">
+          <tr>
+            {["Saison", "Matchs", "Accuracy", "Log loss", "Brier"].map((c) => (
+              <th
+                key={c}
+                scope="col"
+                className={`whitespace-nowrap px-2 py-2 font-semibold sm:px-3 ${c === "Matchs" ? "hidden sm:table-cell" : ""}`}
+              >
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.label} className="border-t border-line">
+              <th scope="row" className={`${cell} font-medium`}>
+                {r.label}
+              </th>
+              <td className={games}>{int(r.n_games)}</td>
+              <td className={cell}>{pct1(r.accuracy)}</td>
+              <td className={cell}>{dec(r.log_loss)}</td>
+              <td className={cell}>{dec(r.brier)}</td>
+            </tr>
+          ))}
+          <tr className="border-t-2 border-line-strong font-semibold">
+            <th scope="row" className={cell}>
+              Ensemble
+            </th>
+            <td className={games}>{int(served.n_games)}</td>
+            <td className={cell}>{pct1(served.accuracy)}</td>
+            <td className={cell}>{dec(served.log_loss)}</td>
+            <td className={cell}>{dec(served.brier)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -81,6 +135,7 @@ export function CalibrationChart({ metrics }) {
   const [hover, setHover] = useState(null);
   const transition = useChartTransition();
   const bins = metrics.calibration;
+  const servedName = metrics.models.find((m) => m.key === metrics.served_model)?.name;
 
   const size = Math.min(width, 460);
   const plot = Math.max(size - CM.left - CM.right, 0);
@@ -93,7 +148,7 @@ export function CalibrationChart({ metrics }) {
     <figure>
       <div aria-hidden="true" className="mb-2 flex flex-wrap gap-4 text-sm font-semibold">
         <span className="flex items-center gap-2">
-          <span className="h-2.5 w-2.5 rounded-full bg-home" /> Modèle XGBoost
+          <span className="h-2.5 w-2.5 rounded-full bg-home" /> Modèle {servedName}
         </span>
         <span className="flex items-center gap-2">
           <span className="w-5 bg-line-strong" style={{ height: 2 }} /> Calibration parfaite
