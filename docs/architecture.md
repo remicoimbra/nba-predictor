@@ -26,10 +26,11 @@ Il n'y a pas de base de données : des fichiers CSV et JSON font office de stock
 | Collecte | `collectors/fetch_games.py` | `nba_api` → `raw/games_raw_all_seasons.csv` (1 ligne par équipe) puis `raw/games_history.csv` (1 ligne par match) |
 | Feuilles de match joueur | `collectors/fetch_player_logs.py` | `nba_api` (`LeagueGameLog`, une requête par saison) → `raw/player_games_raw.csv` (1 ligne par joueur entré en jeu et par match) |
 | Nettoyage | `preprocessing/clean_data.py` | → `processed/games_clean.csv` (typage strict, cible `home_win`, tri chronologique) |
-| Features | `preprocessing/feature_engineering.py` | → `processed/game_features.csv` |
-| Entraînement | `models/train_model.py` | → `saved_models/*.pkl`, `feature_columns.json`, `model_metrics.json` (dont le paramètre du score estimé, calculé par `models/score_model.py`) |
+| Features | `preprocessing/feature_engineering.py` | → `processed/game_features.csv` (+ possessions et total attendus, pour le score) |
+| Entraînement | `models/train_model.py` | → `saved_models/*.pkl`, `feature_columns.json`, `model_metrics.json` (dont les paramètres du score estimé, calculés par `models/score_model.py`) |
 | Évaluation seule | `models/evaluate_model.py` | walk-forward et comparaisons de variantes, sans toucher aux modèles servis → `saved_models/eval/` |
 | Réglage de l'Elo | `models/tune_elo.py` | grille de paramètres notée sur l'Elo seul → `saved_models/eval/tune_elo_grid.csv` |
+| Réglage du score | `models/tune_score_ratings.py` | grille des notes de rythme et de points, notée sur l'erreur du total → `saved_models/eval/tune_score_grid.csv` |
 | Contrôles | `preprocessing/check_features.py` | cohérence entraînement / API et absence de fuite temporelle |
 | État courant | `preprocessing/team_state.py` | → `processed/team_state.json` |
 | Calendrier | `collectors/fetch_schedule.py` | → `processed/schedule.json` (J-3 à J+14) |
@@ -150,7 +151,7 @@ L'explication d'une prédiction reste exacte. Pour un modèle linéaire, la cont
 
 ### `features_lib.py` : une seule définition des formules
 
-L'entraînement calcule les features sur tout l'historique (vectorisé, pandas). L'API les calcule pour un seul match futur à partir de `team_state.json`. Si les deux codes divergeaient, le modèle tournerait sans erreur mais avec de moins bonnes prédictions, sans qu'on le voie. `features_lib.py` contient donc les constantes (fenêtres, paramètres Elo `DEFAULT_ELO_PARAMS`, plafond de repos, calcul de l'effectif) et les fonctions pures utilisées des deux côtés. La non-régression a été vérifiée : l'ancienne et la nouvelle implémentation de l'Elo donnent un écart de 0,0 sur les 8 279 matchs de l'époque. Les formules du score estimé y sont aussi, et `check_features.py` vérifie que l'API sert exactement le score qu'elles donnent sur les features d'entraînement.
+L'entraînement calcule les features sur tout l'historique (vectorisé, pandas). L'API les calcule pour un seul match futur à partir de `team_state.json`. Si les deux codes divergeaient, le modèle tournerait sans erreur mais avec de moins bonnes prédictions, sans qu'on le voie. `features_lib.py` contient donc les constantes (fenêtres, paramètres Elo `DEFAULT_ELO_PARAMS` et des notes du score `DEFAULT_SCORE_RATING_PARAMS`, plafond de repos, calcul de l'effectif) et les fonctions pures utilisées des deux côtés. La non-régression a été vérifiée : l'ancienne et la nouvelle implémentation de l'Elo donnent un écart de 0,0 sur les 8 279 matchs de l'époque. Les formules du score estimé y sont aussi, et `check_features.py` vérifie que l'API calcule le même total attendu que l'entraînement et sert exactement le score et la fourchette qu'elles donnent sur les features d'entraînement.
 
 ### Cas particuliers gérés à la prédiction
 
@@ -175,20 +176,27 @@ FastAPI, un routeur par domaine. La logique est dans `services/`, les routes dan
 
 Le modèle ne classe que victoire ou défaite ; le score s'en déduit en deux temps (formules dans `features_lib.py`, évaluation dans `models/score_model.py`) :
 
-- **Total** des deux équipes : pour chacune, la moyenne de ses points marqués et des points encaissés par l'adversaire sur les 10 derniers matchs.
-- **Écart** : σ · Φ⁻¹(p), où p est la probabilité de victoire à domicile du modèle servi. Si l'écart final suit une loi normale de moyenne μ et d'écart-type σ, alors p = Φ(μ/σ), donc μ = σ · Φ⁻¹(p). σ (12,8 points) est ajusté par moindres carrés sur les matchs d'entraînement et écrit dans `model_metrics.json`.
+- **Total** des deux équipes : possessions attendues × points par possession attendus. Chaque équipe a deux notes, mises à jour après chaque match comme l'Elo : son **rythme** (possessions de ses matchs au-dessus ou en dessous de la moyenne de la ligue) et ses **points** (points pour 100 possessions produits dans ses matchs, les deux équipes réunies, au-dessus de la moyenne : élevé = attaque efficace et/ou défense perméable). Le niveau de la ligue suit lui aussi les matchs, car le jeu évolue (211 points par match en 2016-17, 231 en 2025-26). Entre deux saisons, les notes des équipes reviennent de moitié vers la moyenne. Les possessions d'un match sont estimées à partir des boxscores des deux équipes (FGA + 0,44 FTA − OREB + TOV, moyenne des deux).
+- **Écart** : σ · Φ⁻¹(p), où p est la probabilité de victoire à domicile du modèle servi. Si l'écart final suit une loi normale de moyenne μ et d'écart-type σ, alors p = Φ(μ/σ), donc μ = σ · Φ⁻¹(p). σ (12,7 points) est ajusté par moindres carrés sur les matchs d'entraînement et écrit dans `model_metrics.json`.
+- **Fourchette à 80 %** : chaque score ± une demi-largeur fixe (14,9 points), le quantile 80 % de l'erreur par équipe sur les matchs d'entraînement.
 
-Le score est arrondi à l'entier, sans égalité possible : si les deux arrondis tombent sur la même valeur, le favori prend un point. Le vainqueur du score est donc toujours celui du modèle. L'ancienne méthode estimait chaque équipe séparément (sa forme offensive et la défense adverse) et contredisait le favori sur 22 % des matchs.
+Une seule note de points plutôt qu'attaque et défense séparées : pour le total, seule compte la différence attaque − défense de chaque équipe. Les deux versions donnent exactement les mêmes totaux, et l'avantage du terrain n'y joue aucun rôle. Le niveau de la ligue n'est mis à jour qu'en fin de journée : mis à jour après chaque match, il laissait un match du soir modifier la prévision d'un autre match du même soir, une petite fuite que `check_features.py` a détectée.
+
+Le score est arrondi à l'entier, sans égalité possible : si les deux arrondis tombent sur la même valeur, le favori prend un point. Le vainqueur du score est donc toujours celui du modèle. L'heuristique d'avant le 2026-10-19 estimait chaque équipe séparément et contredisait le favori sur 22 % des matchs.
+
+Paramètres des notes (vitesses d'ajustement du rythme et des points, régression entre saisons, suivi de la ligue) : grille de 500 combinaisons (`models/tune_score_ratings.py`) notée sur l'erreur du total des saisons 2021-22 à 2023-24, confirmation sur 2024-25 et 2025-26.
 
 Mesures en walk-forward (6 140 matchs, erreur absolue moyenne sur les scores affichés) :
 
 | Méthode | Par équipe | Sur l'écart | Sur le total |
 | --- | --- | --- | --- |
 | Moyennes de la saison précédente (naïf) | 10,2 | 12,3 | 16,2 |
-| Ancienne méthode | 9,4 | 11,4 | 14,9 |
-| **Écart déduit de la probabilité** | **9,3** | **10,9** | **14,9** |
+| Méthode précédente : moyennes brutes des 10 derniers matchs, même écart | 9,3 | 10,8 | 14,9 |
+| **Rythme × efficacité, écart déduit de la probabilité** | **9,2** | **10,9** | **14,6** |
 
-Gain par équipe −0,15 point (−0,17 à −0,11), sur l'écart −0,52 (−0,62 à −0,43), même sens sur les 5 saisons. Le total ne change pas, c'est la même formule. Une régression du total (linéaire ou Ridge, moyennes sur 5 et 10 matchs, jours de repos, poids par saison) a été essayée : aucune variante ne fait mieux (écarts de −0,004 à +0,02 point, dans le bruit), on garde la formule, plus simple. Un σ estimé autrement (écart-type résiduel d'une régression de l'écart, 13,5) donne la même erreur à 0,01 point près.
+Gain sur le total −0,28 point (−0,39 à −0,18), même sens sur les 5 saisons, et −0,35 (−0,52 à −0,18) sur les deux saisons non utilisées pour le réglage ; par équipe −0,09 (−0,13 à −0,05). L'écart ne change pas (même méthode). La fourchette contient le vrai score dans 80,9 % des cas (de 79,6 % à 82,5 % selon la saison, 81,5 % en début de saison).
+
+Essais non retenus (écarts dans le bruit) : remettre le niveau de la ligue à la moyenne de la saison précédente au début de chaque saison ; mélanger le total avec celui des moyennes brutes ; tirer l'écart des notes plutôt que de la probabilité (moins bon) ; donner au modèle de victoire l'efficacité nette ajustée (corrélée à 0,99 avec l'Elo). Avant ces notes, une régression du total sur les moyennes récentes (linéaire ou Ridge, 5 et 10 matchs, jours de repos) ne faisait pas mieux que les moyennes brutes.
 
 ## Front (`front/`)
 
@@ -239,6 +247,7 @@ Si les fichiers deviennent insuffisants : PostgreSQL local (conteneur Docker). T
 | 12 variables seulement (écarts + Elo) | Les autres colonnes n'aidaient aucun modèle et gênaient la régression logistique ; elles restent affichées sur la fiche match |
 | Historique depuis 2016-17, saisons pondérées (demi-vie 2) | Plus de données, sans que l'avantage du terrain plus fort de 2016-19 ne biaise le modèle ; ni l'un ni l'autre ne suffisait seul |
 | Écart du score déduit de la probabilité | Erreur plus faible que l'ancienne méthode, et le score ne contredit jamais le favori ; la régression du total n'apportait rien |
+| Total du score par notes de rythme et de points (2026-10-21) | Ajustées aux adversaires, contrairement aux moyennes brutes : −0,28 point d'erreur sur le total, confirmé sur les saisons non utilisées pour le réglage |
 | Pas de variables de fatigue ni de déplacement | Matchs des 4 derniers jours, distance parcourue et décalage horaire essayés (2026-10-19) : aucun gain qui tienne sur les saisons non utilisées pour le réglage ; les jours de repos captent déjà les back-to-back |
 | Absences déduites du dernier match joué | Seule information disponible à 10 h ; −0,0023 de log loss, confirmé sur les saisons non utilisées pour le réglage. Le rapport officiel des blessures n'est pas utilisé |
 | Matchs sur terrain neutre (Paris, Mexico, Las Vegas…) | Absents de l'historique : `LeagueGameFinder` les marque « @ » pour les deux équipes, `fetch_games.py` ne sait pas qui reçoit (10 matchs depuis 2024-25). Piste : les rattacher avec un domicile conventionnel |

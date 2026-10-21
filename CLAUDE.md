@@ -40,15 +40,16 @@ nba-predictor/
 │   ├── preprocessing/
 │   │   ├── clean_data.py           # FAIT
 │   │   ├── feature_engineering.py  # FAIT — v3 (Pace/Net Rating, win_pct contexte, Elo), refactoré cette session
-│   │   ├── features_lib.py         # FAIT (nouveau, cette session) — logique Elo/rolling stats PARTAGÉE entre feature_engineering.py (batch) et predictor_service.py (live) ; EloParams + DEFAULT_ELO_PARAMS (réglés le 2026-10-19) ; FACTOR_FAMILIES + linear_contributions() (explication, étape 3) ; formules du score (expected_total, expected_margin, split_score, rounded_score, étape 5)
+│   │   ├── features_lib.py         # FAIT (nouveau, cette session) — logique Elo/rolling stats PARTAGÉE entre feature_engineering.py (batch) et predictor_service.py (live) ; EloParams + DEFAULT_ELO_PARAMS (réglés le 2026-10-19) ; FACTOR_FAMILIES + linear_contributions() (explication, étape 3) ; formules du score (expected_margin, split_score, rounded_score, étape 5 ; ratings de score ScoreRatingParams/compute_score_rating_timeline/expected_game + score_range, score v2 du 2026-10-21)
 │   │   ├── player_games.py         # FAIT (2026-10-19, étape 6) — lecture/typage des feuilles joueur, restriction aux matchs de games_clean
-│   │   ├── team_state.py           # FAIT — construit team_state.json (état courant par équipe) ; + opponent_id/elo_before par match récent et elo_history (30 pts) depuis la refonte UI ; as_of.elo_params depuis le 2026-10-19
+│   │   ├── team_state.py           # FAIT — construit team_state.json (état courant par équipe) ; + opponent_id/elo_before par match récent et elo_history (30 pts) depuis la refonte UI ; as_of.elo_params depuis le 2026-10-19 ; score_ratings (params, league) + score_rating par équipe depuis le 2026-10-21
 │   │   └── check_features.py       # FAIT (2026-10-19) — contrôles sur les 31 features calculées : game_features.csv à jour, cohérence entraînement/API (+ biais + facteurs = logit(p)), absence de fuite (voir "Amélioration des prédictions")
 │   ├── models/
 │   │   ├── train_model.py          # FAIT — LogReg (SERVIE depuis l'étape 3) + XGBoost (arrêt précoce) + Elo seul (EloOnly) évalués en walk-forward sur 12 features (diff_* + home/away_elo ; 11 avant l'effectif de l'étape 6), réentraînés sur toutes les saisons ; écrit feature_columns.json ET model_metrics.json (lu par GET /model/metrics)
 │   │   ├── evaluate_model.py       # FAIT (2026-10-19) — walk-forward, métriques, comparaison appariée par bootstrap (paired_bootstrap générique), poids par saison (season_weights, SEASON_HALF_LIFE = 2), mode --legacy
-│   │   ├── score_model.py          # FAIT (2026-10-19, étape 5) — score prédit : sigma, walk-forward des erreurs (MAE), comparaison à l'ancienne heuristique et au naïf
+│   │   ├── score_model.py          # FAIT (2026-10-19, étape 5 ; score v2 le 2026-10-21) — score prédit : sigma, fourchette à 80 %, walk-forward des erreurs (MAE) et de la couverture, comparaison à la méthode précédente (moyennes des 10 derniers matchs) et au naïf
 │   │   ├── tune_elo.py             # FAIT (2026-10-19) — grille K × avantage du terrain × régression, notée sur la log loss de l'Elo seul
+│   │   ├── tune_score_ratings.py   # FAIT (2026-10-21) — grille des ratings de score (rythme, points, régression, ligue), notée sur la MAE du total
 │   │   └── saved_models/           # logreg.pkl (servi), xgboost.pkl (XGBClassifier nu, comparaisons locales), feature_columns.json, model_metrics.json (dont score_model, LU PAR L'API), eval/oof_<variante>.csv (référence actuelle : oof_history_hl2.csv), eval/tune_elo_grid.csv (non versionnés)
 │   ├── raw/                        # games_raw_all_seasons.csv, games_history.csv, player_games_raw.csv (non versionnés)
 │   ├── processed/                  # games_clean.csv, game_features.csv, team_state.json (non versionnés)
@@ -403,7 +404,9 @@ Réponse de `/games/today` :
         "away_win_probability": 0.357,
         "predicted_winner": "home",
         "predicted_home_score": 116,
-        "predicted_away_score": 112
+        "predicted_away_score": 112,
+        "predicted_home_score_range": [101, 131],   // depuis le 2026-10-21 (fourchette à 80 %)
+        "predicted_away_score_range": [97, 127]
       }
     }
   ]
@@ -492,6 +495,7 @@ Validé visuellement côté utilisateur : cartes affichées correctement avec no
 20. **Historique étendu à 2016-17 + poids par saison, et étape 5, score prédit (2026-10-19)** : voir "Historique étendu" et "Étape 5" ci-dessous. Déployé le 2026-10-19 (20:21, commit `3b64e1a`), `deploy_to_vps.ps1` seul.
 21. **Étape 4, calendrier (2026-10-19)** : essayée, non adoptée (aucun gain qui tienne sur 2024-25 + 2025-26), voir "Étape 4" ci-dessous. Aucun code fusionné.
 22. **Étape 6, blessures (2026-10-19)** : essai concluant (indicateur d'effectif tiré des feuilles de match par joueur, −0,0023 de log loss, tient sur 2024-25 + 2025-26), puis intégré avec l'accord de l'utilisateur (nouveau collecteur, `team_state.json`, API, front, `sync_to_vps.ps1`), voir "Étape 6" ci-dessous. Déployé le 2026-10-19 (21:20, commit `513470a`) + synchro.
+23. **Score v2 (2026-10-21)** : demande « IA complète » (meilleur score + statistiques des joueurs, en deux fois avec l'accord de l'utilisateur). Total du score par ratings de rythme et de points ajustés aux adversaires, fourchette à 80 % (choix de l'utilisateur), voir "Score v2" ci-dessous. Statistiques des joueurs : prochaine session.
 
 ## Refonte UI (2026-09-28)
 
@@ -673,6 +677,24 @@ Essai d'abord sur un banc hors dépôt (scratchpad de la session), même protoco
 - Ordre pour tout futur changement de l'effectif : `deploy_to_vps.ps1` puis immédiatement `sync_to_vps.ps1` (entre les deux, `lineup_delta` = 0 et avertissement, pas de plantage).
 - **Commits** : `669d6f4` (pipeline + API + synchro), `44840b5` (front), `21ff3b1` (docs), `513470a` : suppression des 4 fichiers vides de l'API (`routers/players.py`, `predictions.py`, `teams.py`, `services/nba_sync_service.py`, supprimés par l'utilisateur avant la session et jamais importés) — nécessaire, car `deploy_to_vps.ps1` copie les fichiers de `git ls-files` et échouait sur des fichiers suivis mais absents.
 
+## Score v2 : rythme × efficacité + fourchette à 80 % (2026-10-21)
+
+Demande de l'utilisateur : « une IA complète », meilleur score prédit ET statistiques des joueurs ; accord pour le faire en deux fois. Cette partie = le score. Plan validé (fichier de plan de la session), même protocole que les étapes du plan d'amélioration : réglage sur 2021-22 → 2023-24 (rodage 2016-17 → 2020-21), confirmation sur les 5 saisons et sur 2024-25 + 2025-26, bootstrap apparié par journée, sous-essais sur un banc hors dépôt.
+
+- **Méthode** (`features_lib.py`, section « Ratings de score ») : total = possessions attendues × points par possession attendus. Par équipe, deux notes mises à jour après chaque match comme l'Elo (donc ajustées aux adversaires) : `pace` (possessions au-dessus de la ligue) et `scoring` (points pour 100 possessions des deux équipes réunies, au-dessus de la ligue). Niveau de la ligue (`pace`, `efficiency` par équipe) suivi lui aussi, **mis à jour en fin de journée seulement**. Régression des notes d'équipe vers 0 entre saisons. Possessions d'un match = moyenne des deux équipes de FGA + 0,44 FTA − OREB + TOV (`game_possessions`, différente de `net_rtg_from_boxscore`, feature du modèle, inchangée). Départ fixe `LEAGUE_INITIAL` (100 possessions, 106 pts/100) en 2016-17. **Écart inchangé** (σ·Φ⁻¹(p)), vainqueur du score = favori. **Fourchette** : ± demi-largeur fixe = quantile 80 % pondéré par saison de |erreur par équipe| sur l'entraînement (`score_model.fit_score_params`), 14,9 pts pour le modèle servi.
+- **Une seule note de points au lieu d'attaque + défense** : pour le total, seule compte attaque − défense par équipe ; vérifié, les deux versions donnent les mêmes totaux à 1e-13, et l'avantage du terrain n'a alors aucun effet sur le total (paramètre retiré).
+- **Paramètres** `DEFAULT_SCORE_RATING_PARAMS` : k_pace 0,04, k_scoring 0,03, régression 0,5, league_rate 0,01 (`tune_score_ratings.py`, 500 combinaisons, profil plat autour). Réglage : MAE du total 14,79 (moyennes des 10 derniers matchs) → 14,56 ; contrôle 2024-26 : 15,10 → 14,77, Δ −0,34 [−0,51 ; −0,17], 2/2.
+- **Walk-forward** (scores affichés, 6 140 matchs), servi / précédente / naïf : par équipe **9,19** / 9,27 / 10,18 ; écart 10,85 / 10,84 / 12,29 ; total **14,64** / 14,93 / 16,15. Servi − précédente : total **−0,28 [−0,39 ; −0,18], 5/5** ; par équipe −0,09 [−0,13 ; −0,05], 5/5 ; écart +0,008, bruit. Sur 2024-25 + 2025-26 seules : total −0,35 [−0,52 ; −0,18], par équipe −0,12 [−0,18 ; −0,06], 2/2. Début de saison (782 matchs) : total 14,72 contre 14,83. **Couverture de la fourchette : 80,9 %** (79,6 à 82,5 % par saison, 81,5 % en début de saison ; légèrement au-dessus de 80 % à cause des bornes entières incluses).
+- **Sous-essais NON adoptés** (saisons de réglage) : (a) niveau de la ligue remis à la moyenne de la saison précédente à chaque nouvelle saison −0,008 [−0,049 ; +0,033] (vise un biais de −4,6 pts en octobre, dû surtout à 2021-22 et au changement des règles sur les fautes provoquées) ; (c) mélange avec les moyennes des 10 derniers matchs, au mieux −0,03 (0,7/0,3 : [−0,07 ; +0,01]), garderait deux méthodes ; (d) efficacité nette ajustée (attaque + défense, avec avantage du terrain 2 pts/100) comme feature de la LogReg : log loss +0,0000 [−0,0007 ; +0,0007], corrélée à 0,989 avec `diff_elo`. Sondage avant le plan : écart tiré des ratings 10,79 contre 10,68 pour σ·Φ⁻¹(p) (mélanges aussi moins bons), back-to-back et `lineup_delta` sans effet notable sur le total, σ proportionnel au rythme sans effet.
+- **Fuite trouvée par `check_features.py`** : première version, niveau de la ligue mis à jour après chaque match → un match du soir changeait la prévision d'un autre match du même soir (le contrôle 2 et le contrôle 1, écart API/pipeline de 0,1-0,5 pt, l'ont attrapée). Corrigé (mise à jour par journée), grille rejouée : mêmes paramètres optimaux.
+- `check_features.py` : colonnes `exp_possessions`/`exp_total` contrôlées partout (`SCORE_COLS`) ; contrôle 1 compare aussi `PredictorService.expected_total` à `exp_total` (1e-9) et le score + les fourchettes servis ; contrôle 2 ajoute +10 points à chaque équipe du match inversé (l'inversion seule laisse le total intact) et exige que le total attendu des matchs suivants change. Vérifié capable d'échouer : total d'avant-match qui « voit » 1 % du résultat → ÉCHEC ; API sans régression de saison → ÉCHEC sur les matchs du soir d'ouverture. Durée ~110 s.
+- **Pipeline** : `feature_engineering.build_features` ajoute `exp_possessions`, `exp_total` (pas des features du modèle : pas de préfixe home_/away_/diff_). `score_model.py` : méthodes `model` (servie), `previous` (= méthode du 2026-10-19), `naive` ; l'heuristique d'avant le 2026-10-19 n'est plus évaluée ; `latest_season_total` prend la dernière saison COMPLÈTE (≥ 1 000 matchs : 2026-27 n'en avait que 3). `model_metrics.json` → `score_model = {sigma, fallback_total, rating_params, interval: {level, half_width}, evaluation: {..., interval: {level, coverage, coverage_early_season, mean_half_width}, per_season[].half_width/coverage}}` ; `window` retiré. Modèle de victoire inchangé (LogReg identique à 4e-16, `--variant score_v2 --compare lineup` : Δ log loss 0).
+- **`team_state.json`** : `score_ratings = {params, league}` + `teams[id].score_rating = {pace, scoring}`, reste du fichier identique. **API** : `PredictorService.expected_total()` (régression de saison comme l'Elo) et `scores()` (public, utilisés par `check_features.py`) ; `predicted_home_score_range` / `predicted_away_score_range` dans `/games/today` et `/games/{id}` ; `_check_score_rating_params()` (avertissement si code / `model_metrics.json` / `team_state.json` diffèrent) ; `team_state.json` sans `score_ratings` → avertissement et total = `fallback_total` (231,2) ; `model_metrics.json` sans `rating_params`/`interval` → 503 (`PredictorNotReadyError`). Vérifié : les deux cas dégradés.
+- **Front** : fiche match, ligne « Fourchette à 80 % » sous le score (pastille de couleur de chaque équipe, texte `sr-only` « entre X et Y points »), puce « À savoir » réécrite ; page modèle, `ScoreCard` avec 4ᵉ tuile (couverture de la fourchette, ±demi-largeur), « méthode précédente », texte sur le rythme et les notes. Cartes de l'accueil inchangées.
+- Prédictions réelles (calendrier, avec le `team_state.json` synchronisé le 2026-10-21) : PHI–CLE le 2026-10-22 38,2 % → 115–119, fourchettes [100, 130] / [104, 134] ; BOS–NYK le 2026-10-23 63,3 % → 114–110.
+- Vérifié : `tune_score_ratings.py`, `feature_engineering.py`, `train_model.py`, `team_state.py`, `check_features.py` (tout OK), routeurs appelés directement (`/games/today` 2026-10-22 et 2026-10-23 : fourchettes présentes, vainqueur cohérent ; `/games/{id}` : biais + facteurs = logit(p) à 1e-4 ; `/model/metrics`), `npm run lint`, `npm run build`, captures CDP (API locale sur 8011, export statique servi sur 3011) : fiche match 375 px sombre / 1280 px clair, page modèle 1280 px sombre / 375 px clair, aucun débordement, aucune erreur console.
+- **Pas encore déployé.** Ordre : `deploy_to_vps.ps1` PUIS immédiatement `sync_to_vps.ps1` (team_state.json doit recevoir les ratings ; entre les deux : total de repli + avertissement, pas de panne). Une synchro AVANT le déploiement est sans danger (l'ancienne API ignore les nouveaux champs).
+
 ## Déploiement (VPS personnel, en ligne depuis le 2026-10-14)
 
 **En ligne : https://nba.remicoimbra.fr.** Guide d'exploitation (redéployer, retour arrière, surveiller, installation initiale) : `docs/deploiement.md`. Le dépôt GitHub est **public** : ne rien y écrire sur les autres services/projets hébergés sur le VPS.
@@ -772,6 +794,7 @@ docker run --rm python:3.12-slim sh -c "pip install -q nba_api && python -c \"fr
 8. ~~(Optionnel, UX) skeleton de chargement~~ : fait avec la refonte UI.
 10. ~~(Modèle) `rest_days` hors distribution~~ : FAIT le 2026-10-14 (plafond à 7 jours, voir "Plafond des jours de repos"). Reste à surveiller : premiers matchs de 2026-27 avec `win_pct` manquant (voir l'observation dans cette même section).
 9. ~~Écrire `README.md` et `docs/architecture.md`~~ : FAIT le 2026-10-14. À relire/ajuster à la main (le README parle à la première personne du projet). Lien de démo ajouté le 2026-10-14.
+11. **« IA complète » (demande du 2026-10-21)** : partie 1, meilleur score prédit, FAITE (voir "Score v2") ; **partie 2, statistiques des joueurs, À FAIRE** (prochaine session) : projection des minutes depuis `player_games_raw.csv`, taux par minute, rythme attendu du match (`exp_possessions`, ratings de score), points de l'équipe = score servi ; évaluation walk-forward contre des moyennes simples.
 
 ## Comment relancer le projet en local
 
@@ -830,9 +853,10 @@ python models\evaluate_model.py --variant baseline              # walk-forward, 
 python models\evaluate_model.py --variant essai --compare baseline   # après modification des features : comparaison appariée
 python models\evaluate_model.py --legacy                        # ancien découpage (test 2025-26)
 python models\tune_elo.py                                       # grille des paramètres Elo (~30 s), ne modifie rien
+python models\tune_score_ratings.py                             # grille des ratings de score (~70 s), ne modifie rien
 # --variant baseline (aussi la valeur par défaut) réécrit oof_baseline.csv (état d'avant l'étape 2) : nommer autrement un essai
 # référence de l'état actuel (étape 6, effectif) : oof_lineup.csv -> --variant essai --compare lineup
-python preprocessing\check_features.py                          # cohérence entraînement/API + absence de fuite (~75 s)
+python preprocessing\check_features.py                          # cohérence entraînement/API + absence de fuite (~110 s)
 ```
 
 Sous Git Bash, préfixer par `PYTHONIOENCODING=utf-8` (sinon accents illisibles dans la console).
