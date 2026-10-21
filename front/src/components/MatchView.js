@@ -9,6 +9,7 @@ import EloLine from "@/components/charts/EloLine";
 import FactorsChart, { ModelVsElo } from "@/components/charts/FactorsChart";
 import FormChart from "@/components/charts/FormChart";
 import WinGauge from "@/components/charts/WinGauge";
+import PlayerProjections from "@/components/PlayerProjections";
 import { EmptyState, ErrorState, Loading } from "@/components/States";
 import { FormPills, PreseasonBadge, TeamBadge } from "@/components/TeamBits";
 import { EASE_OUT } from "@/lib/charts";
@@ -205,11 +206,24 @@ function MatchDetail({ game }) {
           </Section>
         )}
 
+      {prediction?.players && (
+        <Section
+          title="Statistiques des joueurs"
+          subtitle="Ce que chaque joueur du dernier match de son équipe devrait faire s'il joue ; en dessous, une fourchette qui contient la vraie valeur environ 8 fois sur 10. Tous ne joueront pas : le total de leurs points dépasse donc le score estimé."
+          index={3}
+        >
+          <div className="grid gap-6 xl:grid-cols-2">
+            <PlayerProjections team={home} players={prediction.players.home} color={colors.home} />
+            <PlayerProjections team={away} players={prediction.players.away} color={colors.away} />
+          </div>
+        </Section>
+      )}
+
       {hasStats && (
         <Section
           title="Forme récente"
           subtitle="Écart de points sur les 10 derniers matchs : au-dessus de zéro, une victoire."
-          index={3}
+          index={4}
         >
           <div className="grid gap-8 md:grid-cols-2">
             <FormChart team={home} color={colors.home} />
@@ -222,13 +236,13 @@ function MatchDetail({ game }) {
         <Section
           title="Évolution Elo"
           subtitle="Rating après chaque match. Plus il est haut, plus l'équipe est forte."
-          index={4}
+          index={5}
         >
           <EloLine home={home} away={away} colors={colors} />
         </Section>
       )}
 
-      <Section title="À savoir" index={5}>
+      <Section title="À savoir" index={6}>
         <ul className="list-disc space-y-2 pl-5 text-sm text-text-2">
           <li>
             Le score s&apos;appuie sur le rythme et l&apos;efficacité des deux
@@ -240,6 +254,13 @@ function MatchDetail({ game }) {
             Les absences sont déduites du dernier match joué, pas du rapport
             officiel des blessures : un joueur qui revient ce soir est encore
             compté absent, un forfait de dernière minute est ignoré.
+          </li>
+          <li>
+            Les statistiques des joueurs sont celles attendues s&apos;ils
+            jouent : minutes estimées par un modèle appris sur les saisons
+            passées, puis rythme de chacun par minute, ajusté au rythme du
+            match et à l&apos;adversaire. Un joueur qui revient de blessure
+            n&apos;y figure pas.
           </li>
           {game.season_type === "preseason" && (
             <li>

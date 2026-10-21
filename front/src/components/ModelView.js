@@ -31,6 +31,8 @@ export default function ModelView() {
           effectif…) calculés avant chaque match. Elle a été préférée à XGBoost, dont les
           probabilités sont moins fiables, et elle est comparée au rating Elo
           seul et à la règle naïve «&nbsp;le domicile gagne toujours&nbsp;».
+          Le score et les statistiques des joueurs sont estimés à part, et
+          mesurés de la même façon.
         </p>
       </header>
 
@@ -146,6 +148,8 @@ function ModelDetail({ m }) {
 
       {m.score_model && <ScoreCard score={m.score_model} period={period} />}
 
+      {m.player_model && <PlayerCard players={m.player_model} period={period} />}
+
       <Card
         title="Ce qui compte le plus"
         subtitle="Poids moyen de chaque famille de statistiques dans les prédictions (part du total). « Forme récente » réunit le bilan et le Net Rating des derniers matchs ; « Effectif » compare les joueurs du dernier match (Game Score des 8 meilleurs) à l'effectif habituel, pour repérer les absents."
@@ -203,7 +207,9 @@ function ModelDetail({ m }) {
               et le score
               estimé se trompe en moyenne de{" "}
               {scoreError ? `${num(scoreError)} points` : "plusieurs points"}{" "}
-              par équipe.
+              par équipe. Les statistiques des joueurs supposent que ceux du
+              dernier match jouent, et varient beaucoup d&apos;un soir à
+              l&apos;autre.
             </p>
           </div>
         </div>
@@ -276,6 +282,72 @@ function ScoreCard({ score, period }) {
           ` La fourchette affichée sur chaque match (±${int(score.interval.half_width)} points autour de chaque score) est réglée pour contenir le vrai score ${pct(interval.level)} du temps ; sur les saisons testées, c'est le cas ${pct1(interval.coverage)} du temps.`}{" "}
         «&nbsp;Naïf&nbsp;» : le score moyen de la saison précédente pour tous
         les matchs.
+      </p>
+    </Card>
+  );
+}
+
+const PLAYER_STATS = [
+  { key: "min", label: "Minutes", unit: "min" },
+  { key: "pts", label: "Points", unit: "pts" },
+  { key: "reb", label: "Rebonds", unit: "" },
+  { key: "ast", label: "Passes décisives", unit: "" },
+  { key: "stl", label: "Interceptions", unit: "" },
+  { key: "blk", label: "Contres", unit: "" },
+];
+
+// Erreur moyenne des statistiques projetées des joueurs (walk-forward),
+// comparée aux moyennes simples, et couverture réelle des fourchettes.
+// players.evaluation : data/models/player_model.py (methods : model,
+// formula, season, last10).
+function PlayerCard({ players, period }) {
+  const evaluation = players.evaluation;
+  const methods = Object.fromEntries(evaluation.methods.map((x) => [x.key, x.stats]));
+  const { model, formula, season, last10 } = methods;
+  const { coverage } = evaluation.interval;
+  const participation = evaluation.participation;
+  // Deux décimales : à 0,1 près, les petites stats (passes, contres) se
+  // confondraient avec les références.
+  const value = (v, unit) => `${dec(v, 2)}${unit ? ` ${unit}` : ""}`;
+
+  return (
+    <Card
+      title="Statistiques des joueurs"
+      subtitle={`Écart moyen entre la projection et la vraie valeur, pour les joueurs attendus qui ont joué, saisons ${period} (prédites sans les avoir vues). Plus bas = mieux.`}
+    >
+      <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {PLAYER_STATS.map((s) => (
+          <div key={s.key} className="rounded-xl border border-line bg-surface p-4">
+            <dt className="text-sm text-text-2">{s.label}</dt>
+            <dd className="mt-1 text-3xl font-bold tracking-tight">
+              {value(model[s.key].mae, s.unit)}
+            </dd>
+            <dd className="text-sm text-text-2">
+              moyenne de la saison {dec(season[s.key].mae, 2)} · 10 derniers{" "}
+              {dec(last10[s.key].mae, 2)}
+            </dd>
+            <dd className="text-sm text-text-2">
+              fourchette : {pct(coverage[s.key])} des valeurs dedans
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <p className="mt-5 max-w-3xl text-sm leading-relaxed text-text-2">
+        Les joueurs attendus sont ceux du dernier match de leur équipe. Leurs
+        minutes viennent d&apos;un modèle appris (XGBoost) sur les saisons
+        passées : moyennes récentes, repos, nombre de joueurs disponibles,
+        rythme et déséquilibre attendus du match. Chaque statistique est
+        ensuite le produit de ces minutes et du rendement du joueur par minute
+        (ses derniers matchs, rapprochés de la moyenne de la ligue quand il a
+        peu joué), ajusté au rythme du match et, pour les rebonds, passes,
+        interceptions et contres, à ce que concède l&apos;adversaire. Sans le
+        modèle de minutes, l&apos;erreur sur les minutes passerait de{" "}
+        {dec(model.min.mae, 2)} à {dec(formula.min.mae, 2)}. Pour les
+        statistiques rares (interceptions, contres), l&apos;écart avec les
+        simples moyennes reste minime. Limites :{" "}
+        {pct(participation.did_not_play)} des joueurs attendus ne jouent
+        finalement pas, et {pct(participation.uncovered_minutes)} des minutes
+        vont à des joueurs absents du match précédent (retours de blessure).
       </p>
     </Card>
   );
