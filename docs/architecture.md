@@ -8,8 +8,8 @@ Ce document explique comment le projet est construit et pourquoi. Pour lancer l'
 PC de développement (IP résidentielle)
   nba_api ──> data/collectors ──> data/preprocessing ──> data/models
                                         │                    │
-                          team_state.json, schedule.json    logreg.pkl, feature_columns.json,
-                                        │                    model_metrics.json
+                          team_state.json, schedule.json    logreg.pkl, player_minutes.pkl,
+                                        │                    feature_columns.json, model_metrics.json
                                         ▼                    ▼
                                  api/ (FastAPI) ── lit les fichiers, prédit à la demande
                                         │ JSON
@@ -151,7 +151,7 @@ L'explication d'une prédiction reste exacte. Pour un modèle linéaire, la cont
 
 ### `features_lib.py` : une seule définition des formules
 
-L'entraînement calcule les features sur tout l'historique (vectorisé, pandas). L'API les calcule pour un seul match futur à partir de `team_state.json`. Si les deux codes divergeaient, le modèle tournerait sans erreur mais avec de moins bonnes prédictions, sans qu'on le voie. `features_lib.py` contient donc les constantes (fenêtres, paramètres Elo `DEFAULT_ELO_PARAMS` et des notes du score `DEFAULT_SCORE_RATING_PARAMS`, plafond de repos, calcul de l'effectif) et les fonctions pures utilisées des deux côtés. La non-régression a été vérifiée : l'ancienne et la nouvelle implémentation de l'Elo donnent un écart de 0,0 sur les 8 279 matchs de l'époque. Les formules du score estimé y sont aussi, et `check_features.py` vérifie que l'API calcule le même total attendu que l'entraînement et sert exactement le score et la fourchette qu'elles donnent sur les features d'entraînement.
+L'entraînement calcule les features sur tout l'historique (vectorisé, pandas). L'API les calcule pour un seul match futur à partir de `team_state.json`. Si les deux codes divergeaient, le modèle tournerait sans erreur mais avec de moins bonnes prédictions, sans qu'on le voie. `features_lib.py` contient donc les constantes (fenêtres, paramètres Elo `DEFAULT_ELO_PARAMS` et des notes du score `DEFAULT_SCORE_RATING_PARAMS`, plafond de repos, calcul de l'effectif) et les fonctions pures utilisées des deux côtés. La non-régression a été vérifiée : l'ancienne et la nouvelle implémentation de l'Elo donnent un écart de 0,0 sur les 8 279 matchs de l'époque. Les formules du score estimé y sont aussi, et `check_features.py` vérifie que l'API calcule le même total attendu que l'entraînement et sert exactement le score et la fourchette qu'elles donnent sur les features d'entraînement. Même chose pour les statistiques des joueurs : mêmes joueurs attendus, mêmes entrées du modèle de minutes et mêmes valeurs servies côté API et côté entraînement, et aucune entrée d'un match ne bouge si l'on gonfle la feuille de match d'un joueur dans ce match.
 
 ### Cas particuliers gérés à la prédiction
 
@@ -197,6 +197,39 @@ Mesures en walk-forward (6 140 matchs, erreur absolue moyenne sur les scores aff
 Gain sur le total −0,28 point (−0,39 à −0,18), même sens sur les 5 saisons, et −0,35 (−0,52 à −0,18) sur les deux saisons non utilisées pour le réglage ; par équipe −0,09 (−0,13 à −0,05). L'écart ne change pas (même méthode). La fourchette contient le vrai score dans 80,9 % des cas (de 79,6 % à 82,5 % selon la saison, 81,5 % en début de saison).
 
 Essais non retenus (écarts dans le bruit) : remettre le niveau de la ligue à la moyenne de la saison précédente au début de chaque saison ; mélanger le total avec celui des moyennes brutes ; tirer l'écart des notes plutôt que de la probabilité (moins bon) ; donner au modèle de victoire l'efficacité nette ajustée (corrélée à 0,99 avec l'Elo). Avant ces notes, une régression du total sur les moyennes récentes (linéaire ou Ridge, 5 et 10 matchs, jours de repos) ne faisait pas mieux que les moyennes brutes.
+
+### Les statistiques des joueurs
+
+Pour chaque match, la fiche donne les minutes, points, rebonds, passes décisives, interceptions et contres attendus de chaque joueur, **s'il joue** : c'est une moyenne attendue, pas une certitude (formules dans `features_lib.py`, modèle et évaluation dans `models/player_model.py`, réglage dans `models/tune_player_projections.py`).
+
+- **Joueurs attendus** : ceux du dernier match de l'équipe dans la saison, même hypothèse que pour les absences. Au premier match de la saison, aucun (les effectifs ont changé pendant l'intersaison).
+- **Minutes** : un modèle appris (XGBoost, profondeur 4, nombre d'arbres par arrêt précoce, saisons pondérées comme le modèle de victoire) à partir de 28 entrées : moyennes de minutes pondérées (demi-vies 2 et 10 matchs), minutes du dernier match, de la saison et des 10 derniers matchs, jours de repos, nombre de joueurs disponibles et leurs minutes cumulées, rythme et total attendus du match, probabilité Elo, rendement du joueur.
+- **Autres statistiques** : minutes × rendement par minute attendu pour ce match. Rendement du joueur : moyenne pondérée de ses matchs (demi-vie propre à chaque statistique, 10 matchs pour les points, 40 pour les contres), rapprochée du rendement moyen de la ligue de la saison précédente par quelques minutes fictives (25 pour les points, 200 pour les interceptions), ce qui tempère les recrues et les petits temps de jeu. Il est multiplié par le rythme attendu du match (possessions des notes de score / possessions moyennes des matchs du joueur) et, pour les rebonds, passes, interceptions et contres, par (ce que concède l'adversaire / moyenne de la ligue)^0,5.
+- **Fourchette à 80 %** : les projections sont découpées en tranches (quantiles, plus quelques tranches fines pour les plus grosses projections) et, dans chaque tranche, on garde l'intervalle d'entiers qui contient la part des vraies valeurs la plus proche de 80 %. Des quantiles 10 % / 90 % auraient couvert bien plus (94 % pour les interceptions : les valeurs sont des petits entiers). Les tranches sont apprises sur des projections **hors échantillon** : sur ses propres matchs d'entraînement, le modèle de minutes est trop précis et les fourchettes seraient trop étroites.
+
+Même protocole que pour le reste : réglages sur 2021-22 à 2023-24, sous-essais un par un, confirmation sur les 5 saisons et sur 2024-25 + 2025-26. Les erreurs portent sur les joueurs attendus qui ont joué. La décision se fait sur l'erreur quadratique, qui récompense la bonne moyenne, et l'erreur absolue est affichée.
+
+| Étape (erreur quadratique, 5 saisons) | Points | Rebonds | Passes | Effet |
+| --- | --- | --- | --- | --- |
+| Rythme du match | −0,08 | −0,008 | −0,004 | retenu (toutes les stats, 5 saisons sur 5) |
+| Adversaire, exposant 0,5 | — | −0,013 | −0,012 | retenu (aussi interceptions et contres) |
+| Minutes apprises (XGBoost) au lieu de la moyenne pondérée | −0,61 | −0,11 | −0,03 | retenu ; minutes −2,88 (−3,37 à −2,51) |
+| Points ramenés au score estimé de l'équipe | +0,50 | — | — | écarté |
+| Minutes réduites si le match s'annonce déséquilibré | ≈ 0 | −0,03 | +0,004 | écarté (erreur absolue dégradée partout) |
+| XGBoost pour chaque statistique directement | −0,04 (bruit) | +0,02 | +0,008 | écarté : moins bon que minutes apprises × rendement |
+
+Résultat final (erreur absolue moyenne, walk-forward, 111 136 joueurs) :
+
+| Méthode | Minutes | Points | Rebonds | Passes | Interceptions | Contres |
+| --- | --- | --- | --- | --- | --- | --- |
+| Moyenne de la saison du joueur | 5,31 | 4,80 | 1,97 | 1,38 | 0,73 | 0,53 |
+| Moyenne de ses 10 derniers matchs | 5,14 | 4,81 | 1,98 | 1,39 | 0,74 | 0,53 |
+| Formule sans modèle de minutes | 4,89 | 4,70 | 1,92 | 1,35 | 0,71 | 0,53 |
+| **Minutes apprises × rendement** | **4,77** | **4,68** | **1,91** | **1,35** | **0,72** | **0,53** |
+
+En erreur quadratique, le modèle bat les deux moyennes et la formule seule sur les six statistiques, 5 saisons sur 5. Exception assumée : pour les interceptions et les contres, l'erreur absolue est un peu moins bonne que celle de la formule seule (+0,002), car elle récompense la médiane, qui vaut 0 pour la plupart des joueurs. Une seule projection de minutes est gardée pour toutes les statistiques, pour que le tableau reste cohérent. Les fourchettes contiennent la vraie valeur dans 79,6 % (minutes) à 82,7 % (contres) des cas.
+
+Limites : 14 % des joueurs attendus ne jouent finalement pas, et 9 % des minutes vont à des joueurs absents du match précédent (retours de blessure). Les points des joueurs ne sont pas ramenés au score estimé de l'équipe (essai écarté) : leur total, qui compte aussi ceux qui ne joueront pas, dépasse ce score.
 
 ## Front (`front/`)
 

@@ -1,6 +1,6 @@
 # NBA Predictor
 
-Application web qui prédit l'issue des matchs NBA : probabilité de victoire, score estimé, et surtout **l'explication** de chaque prédiction (quelles statistiques ont pesé, et dans quel sens).
+Application web qui prédit l'issue des matchs NBA : probabilité de victoire, score estimé, statistiques attendues de chaque joueur, et surtout **l'explication** de chaque prédiction (quelles statistiques ont pesé, et dans quel sens).
 
 Projet personnel réalisé en BUT MMI (parcours Dev) pour travailler un projet complet de bout en bout : collecte de données, machine learning, API REST et interface web.
 
@@ -11,8 +11,8 @@ Projet personnel réalisé en BUT MMI (parcours Dev) pour travailler un projet c
 ## Ce que fait l'application
 
 - **Matchs du jour** : un bandeau de 14 jours et un calendrier mensuel au clavier, avec pour chaque match la probabilité de victoire, le score estimé et la forme récente des deux équipes.
-- **Fiche match** : score estimé avec sa fourchette à 80 %, pourquoi le modèle prédit ce résultat (contributions exactes de chaque statistique, regroupées par famille), comparaison côte à côte des deux équipes, courbes de forme et d'évolution de l'Elo.
-- **Page « Le modèle »** : précision, log loss, score de Brier, résultats saison par saison, courbe de calibration et poids de chaque famille de statistiques, lus directement dans les résultats du dernier entraînement.
+- **Fiche match** : score estimé avec sa fourchette à 80 %, pourquoi le modèle prédit ce résultat (contributions exactes de chaque statistique, regroupées par famille), comparaison côte à côte des deux équipes, statistiques attendues de chaque joueur (minutes, points, rebonds, passes décisives, interceptions, contres, chacune avec sa fourchette à 80 %), courbes de forme et d'évolution de l'Elo.
+- **Page « Le modèle »** : précision, log loss, score de Brier, résultats saison par saison, courbe de calibration, poids de chaque famille de statistiques, erreur du score et des statistiques des joueurs, lus directement dans les résultats du dernier entraînement.
 - **Accessibilité** : couleurs vérifiées au contraste WCAG AAA (`npm run check:contrast`), thème clair et sombre, navigation au clavier, tableau de données alternatif pour chaque graphique, animations réduites si le système le demande.
 
 | Fiche match (sombre) | Page « Le modèle » |
@@ -32,9 +32,19 @@ Historique : 10 saisons régulières (2016-17 à 2025-26, 11 969 matchs), les pl
 
 Le **score estimé** se trompe en moyenne de 9,2 points par équipe (9,3 avec la méthode précédente, 10,2 en prédisant la moyenne de la saison précédente). Le total vient de deux notes par équipe, mises à jour après chaque match comme l'Elo et donc ajustées aux adversaires : son rythme (possessions) et les points marqués par possession dans ses matchs. Il se trompe de 14,6 points en moyenne, contre 14,9 avec les moyennes brutes des 10 derniers matchs (gain confirmé sur les saisons non utilisées pour le réglage). L'écart est déduit de la probabilité de victoire : le favori du modèle est toujours devant. Chaque score est accompagné d'une fourchette (±15 points) qui contient le vrai score dans 81 % des cas sur les saisons testées, pour 80 % visés.
 
+Les **statistiques des joueurs** sont projetées pour les joueurs du dernier match de chaque équipe, « s'ils jouent » : leurs minutes par un modèle appris (XGBoost : moyennes récentes, repos, joueurs disponibles, rythme et déséquilibre attendus du match), puis chaque statistique comme minutes × rendement par minute du joueur, ajusté au rythme du match et à ce que concède l'adversaire. Erreur moyenne par joueur et par match, sur les mêmes saisons jamais vues :
+
+| Méthode | Minutes | Points | Rebonds | Passes | Interceptions | Contres |
+| --- | --- | --- | --- | --- | --- | --- |
+| Moyenne de la saison du joueur | 5,31 | 4,80 | 1,97 | 1,38 | 0,73 | 0,53 |
+| Moyenne de ses 10 derniers matchs | 5,14 | 4,81 | 1,98 | 1,39 | 0,74 | 0,53 |
+| **Minutes apprises × rendement par minute** | **4,77** | **4,68** | **1,91** | **1,35** | **0,72** | **0,53** |
+
+En erreur quadratique (le critère retenu, puisque la valeur affichée est une moyenne attendue), le modèle bat les deux moyennes sur les six statistiques, dans le même sens sur les 5 saisons. Chaque valeur est accompagnée d'une fourchette qui contient la vraie valeur dans 80 à 83 % des cas selon la statistique. Essais non retenus : ramener les points des joueurs au score estimé de l'équipe (nettement moins bon), réduire les minutes des titulaires quand le match s'annonce déséquilibré, prédire chaque statistique directement avec XGBoost (moins bon que « minutes apprises × rendement », sauf pour les points, à égalité).
+
 La précision varie de 63 % à 69 % selon la saison. Sur la seule saison 2025-26, la plus facile de la période, les trois modèles atteignent 69 %. La régression logistique, qui ne garde que 12 variables (écarts entre les deux équipes et Elo de chacune), donne les meilleures probabilités : sa log loss est significativement plus basse que celle de XGBoost et que celle de l'Elo seul, dans le même sens sur les 5 saisons. C'est donc elle qui est en ligne, et chacune de ses prédictions se décompose exactement en contributions des statistiques. Les paramètres de l'Elo (avantage du terrain, régression entre saisons) ont été réglés sur des saisons passées puis confirmés sur deux saisons jamais vues ; l'Elo seul faisait alors jeu égal avec la régression logistique. C'est un indicateur d'**effectif** qui a fait la différence : la force des joueurs du dernier match comparée à l'effectif habituel, tirée des feuilles de match par joueur, qui repère les absents (log loss −0,0023, gain confirmé sur les saisons non utilisées pour le choix). La variable de loin la plus utile est la **différence de rating Elo** entre les deux équipes ; c'est elle qui a fait passer la précision de 66,8 % à près de 69 % (sur 2025-26) pendant le développement.
 
-**Limites assumées** : les absences sont déduites du dernier match joué, pas du rapport officiel des blessures : un joueur qui revient de blessure est encore compté absent, un forfait de dernière minute est ignoré. Le score affiché reste un ordre de grandeur : un total de points est difficile à prévoir (environ 15 points d'erreur sur le total des deux équipes, d'où une fourchette large). En tout début de saison, `win_pct` n'a pas encore de valeur, et les premières prédictions reposent surtout sur l'Elo et la forme de fin de saison précédente.
+**Limites assumées** : les absences sont déduites du dernier match joué, pas du rapport officiel des blessures : un joueur qui revient de blessure est encore compté absent, un forfait de dernière minute est ignoré. Le score affiché reste un ordre de grandeur : un total de points est difficile à prévoir (environ 15 points d'erreur sur le total des deux équipes, d'où une fourchette large). En tout début de saison, `win_pct` n'a pas encore de valeur, et les premières prédictions reposent surtout sur l'Elo et la forme de fin de saison précédente. Les statistiques des joueurs n'apparaissent qu'après le premier match de la saison de chaque équipe (avant, ses joueurs ne sont pas connus) ; 14 % des joueurs attendus ne jouent finalement pas, et 9 % des minutes vont à des joueurs absents du match précédent.
 
 ## Architecture
 
@@ -99,7 +109,7 @@ Contrôles du front : `npm run lint`, `npm run build`, `npm run check:contrast`.
 | --- | --- |
 | `GET /games/today?date=AAAA-MM-JJ` | Matchs d'un jour (aujourd'hui par défaut) avec prédiction |
 | `GET /games/calendar` | Jours disponibles et nombre de matchs |
-| `GET /games/{game_id}` | Fiche complète d'un match : facteurs, statistiques, historique d'Elo |
+| `GET /games/{game_id}` | Fiche complète d'un match : facteurs, statistiques, historique d'Elo, statistiques attendues des joueurs |
 | `GET /model/metrics` | Résultats du dernier entraînement |
 
 En production, ces routes sont servies sous `/api` (par exemple `https://nba.remicoimbra.fr/api/games/calendar`).

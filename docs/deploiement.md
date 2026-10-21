@@ -47,7 +47,7 @@ Après une modification du code, du front ou un réentraînement du modèle :
 Le script construit le front (`NEXT_PUBLIC_API_URL=/api`), envoie le code de l'API (fichiers suivis par git, dans leur état local), `features_lib.py`, le modèle et le front, puis lance [infra/vps/deploy_remote.sh](../infra/vps/deploy_remote.sh) sur le serveur. Celui-ci :
 
 1. met à jour les dépendances Python, seulement si `api/requirements.txt` a changé ;
-2. remplace le code de l'API et le modèle (`logreg.pkl`, `feature_columns.json`, `model_metrics.json`), en gardant les précédents pour un retour arrière ;
+2. remplace le code de l'API et le modèle (`logreg.pkl`, `player_minutes.pkl`, `feature_columns.json`, `model_metrics.json`), en gardant les précédents pour un retour arrière ;
 3. installe le front dans une nouvelle version et bascule `current` d'un coup ;
 4. redémarre le service et vérifie qu'il répond, y compris une première prédiction (`/games/today` : 200, ou 404 si le jour manque au calendrier).
 
