@@ -35,6 +35,17 @@ les colonnes du score prédit (SCORE_COLS : ratings de score d'avant-match).
    meilleur joueur de l'équipe à domicile (comme s'il avait été absent).
    Aucune feature de ce match ni des matchs antérieurs ne doit bouger ; le
    lineup_delta du match suivant de l'équipe, si.
+4. Absence de fuite dans les statistiques des joueurs : on gonfle la ligne
+   du joueur le plus utilisé de l'équipe à domicile dans un match (minutes,
+   points, rebonds...). Les entrées des projections (PLAYER_COLS) de ce
+   match et des matchs antérieurs ne doivent pas bouger ; celles de ce
+   joueur au match suivant de son équipe, si.
+
+Les contrôles 1 et 2 portent aussi sur les projections des joueurs : mêmes
+joueurs attendus, mêmes entrées (PLAYER_COLS) et mêmes stats et fourchettes
+servies côté API que côté batch (features_lib.compute_player_rows), premiers
+matchs de la saison compris (aucun joueur attendu) ; inverser un résultat
+ne change aucune entrée antérieure et change celles des matchs suivants.
 
 Usage :
     cd data
@@ -52,8 +63,17 @@ import numpy as np
 import pandas as pd
 
 from feature_engineering import build_features
-from features_lib import expected_margin, game_score, rounded_score, score_range, split_score
-from player_games import load_player_games
+from features_lib import (
+    COUNT_STATS,
+    MINUTES_FEATURES,
+    compute_player_rows,
+    expected_margin,
+    game_score,
+    rounded_score,
+    score_range,
+    split_score,
+)
+from player_games import load_player_games, restrict_to_games
 from team_state import build_team_state
 
 DATA_DIR = Path(__file__).resolve().parent.parent
@@ -66,6 +86,10 @@ CLEAN_PATH = DATA_DIR / "processed" / "games_clean.csv"
 FEATURES_PATH = DATA_DIR / "processed" / "game_features.csv"
 
 SCORE_COLS = ["exp_possessions", "exp_total"]  # colonnes du score prédit, pas des features du modèle
+# Entrées des projections des joueurs : modèle de minutes + taux attendus du match.
+PLAYER_COLS = list(dict.fromkeys(MINUTES_FEATURES + [f"per_min_{s}" for s in COUNT_STATS]))
+PLAYER_KEYS = ["team_id", "nba_game_id", "player_id"]
+INFLATED = {"min": 10, "pts": 15, "oreb": 3, "dreb": 3, "ast": 4, "stl": 2, "blk": 2}  # contrôle 4
 TOLERANCE = 1e-9
 # Facteurs, biais et probabilité sont arrondis à 4 décimales par l'API.
 EXPLANATION_TOLERANCE = 1e-3
@@ -120,8 +144,41 @@ def batch_score(service: PredictorService, batch_row: pd.Series) -> tuple:
     return rounded_score(home, away, p >= 0.5), list(score_range(home, half_width)), list(score_range(away, half_width))
 
 
+def player_batch_rows(batch: pd.DataFrame, clean: pd.DataFrame, players: pd.DataFrame) -> pd.DataFrame:
+    """Entrées des projections des joueurs côté entraînement (batch = build_features(clean, players))."""
+    return compute_player_rows(batch, restrict_to_games(players, clean))
+
+
+def projections_by_player(projections: list) -> dict:
+    return {p["player_id"]: p["stats"] for p in projections}
+
+
+def player_gaps(service: PredictorService, live: pd.DataFrame, batch_rows: pd.DataFrame, served: list) -> str | None:
+    """
+    Écart entre les joueurs attendus d'une équipe côté API (`live`,
+    PredictorService.player_inputs) et côté batch : mêmes joueurs, mêmes
+    entrées, et stats/fourchettes servies (`served`) égales à celles
+    calculées à partir des entrées du batch. None si tout est identique.
+    """
+    live_ids = set(live["player_id"].astype(int)) if not live.empty else set()
+    batch_ids = set(batch_rows["player_id"].astype(int))
+    if live_ids != batch_ids:
+        return f"joueurs attendus différents ({len(live_ids)} API, {len(batch_ids)} batch)"
+    if not live_ids:
+        return None if not served else "projections servies sans joueur attendu"
+    a = live.set_index(live["player_id"].astype(int)).sort_index()
+    b = batch_rows.set_index(batch_rows["player_id"].astype(int)).sort_index()
+    diff = [c for c in PLAYER_COLS if any(not same_value(x, y) for x, y in zip(a[c], b[c]))]
+    if diff:
+        return f"entrées différentes : {diff[:5]}"
+    expected = projections_by_player(service.player_projections(b.assign(name="")))
+    if projections_by_player(served) != expected:
+        return "stats ou fourchettes servies différentes du calcul batch"
+    return None
+
+
 def check_train_live_consistency(
-    clean: pd.DataFrame, players: pd.DataFrame, batch: pd.DataFrame, columns: list[str],
+    clean: pd.DataFrame, players: pd.DataFrame, batch: pd.DataFrame, columns: list[str], player_batch: pd.DataFrame,
 ) -> bool:
     counts = clean["season"].value_counts()
     season = max(s for s, n in counts.items() if n >= MIN_SEASON_GAMES)
@@ -136,6 +193,8 @@ def check_train_live_consistency(
     failures = []
     total_failures = []
     score_failures = []
+    player_failures = []
+    player_sides = 0  # équipes avec au moins un joueur attendu
     worst_gap = 0.0  # écart max |biais + somme des facteurs - logit(p)|
     with tempfile.TemporaryDirectory() as tmp:
         state_path = Path(tmp) / "team_state.json"
@@ -178,6 +237,14 @@ def check_train_live_consistency(
                 if served != batch_score(service, batch_rows.loc[game.nba_game_id]) or home_ahead != (pred.predicted_winner == "home"):
                     score_failures.append((game.nba_game_id, served, pred.predicted_winner))
 
+                inputs = service.player_inputs(*teams, as_of_date=as_of)
+                game_rows = player_batch[player_batch["nba_game_id"] == game.nba_game_id]
+                for side, team_id in zip(("home", "away"), teams):
+                    gap = player_gaps(service, inputs[side], game_rows[game_rows["team_id"] == team_id], pred.players[side])
+                    player_sides += bool(pred.players[side])
+                    if gap:
+                        player_failures.append((game.nba_game_id, side, gap))
+
     ok = True
     if failures:
         print(f"  ÉCHEC : {len(failures)} matchs sur {len(sample)} diffèrent entre entraînement et API")
@@ -201,6 +268,14 @@ def check_train_live_consistency(
         ok = False
     else:
         print("  OK : score et fourchettes servis = formules de features_lib sur les features d'entraînement, vainqueur prédit en tête")
+    if player_failures:
+        print(f"  ÉCHEC : projections des joueurs différentes entre API et batch : {player_failures[:5]}")
+        ok = False
+    else:
+        print(
+            f"  OK : projections des joueurs identiques API / batch ({player_sides} équipes avec joueurs attendus, "
+            f"{2 * len(sample) - player_sides} sans : premiers matchs de saison)"
+        )
     return ok
 
 
@@ -238,13 +313,33 @@ def changed(base: pd.DataFrame, feats: pd.DataFrame, index, columns: list[str]) 
     return ~(np.isclose(a, b, rtol=0, atol=TOLERANCE) | (np.isnan(a) & np.isnan(b)))
 
 
-def check_no_leakage(clean: pd.DataFrame, players: pd.DataFrame, batch: pd.DataFrame, columns: list[str]) -> bool:
+def player_changes(base_rows: pd.DataFrame, rows: pd.DataFrame, game_date) -> tuple[list[str], bool]:
+    """
+    (entrées modifiées pour les joueurs des matchs jusqu'à `game_date` inclus,
+    au moins une entrée modifiée après) entre deux calculs de compute_player_rows.
+    """
+    a = base_rows.set_index(PLAYER_KEYS)
+    b = rows.set_index(PLAYER_KEYS)
+    before_a, before_b = a.index[a["game_date"] <= game_date], b.index[b["game_date"] <= game_date]
+    if set(before_a) != set(before_b):
+        return ["joueurs attendus"], False
+    leaked = changed(a, b, before_a, PLAYER_COLS).any(axis=0)
+    later = a.index[a["game_date"] > game_date].intersection(b.index)
+    return [PLAYER_COLS[j] for j in np.where(leaked)[0]], bool(changed(a, b, later, PLAYER_COLS).any())
+
+
+def check_no_leakage(
+    clean: pd.DataFrame, players: pd.DataFrame, batch: pd.DataFrame, columns: list[str], player_batch: pd.DataFrame,
+) -> bool:
     season, picked = leak_candidates(clean)
     base = batch.set_index("nba_game_id")
 
     ok = True
     for game in picked.itertuples():
-        feats = build_features(flipped_result(clean, game.nba_game_id), players).set_index("nba_game_id")
+        flipped = flipped_result(clean, game.nba_game_id)
+        feats = build_features(flipped, players)
+        player_leaked, player_propagated = player_changes(player_batch, player_batch_rows(feats, flipped, players), game.game_date)
+        feats = feats.set_index("nba_game_id")
         dates = feats["game_date"]
         teams = (game.home_team_id, game.away_team_id)
 
@@ -260,8 +355,17 @@ def check_no_leakage(clean: pd.DataFrame, players: pd.DataFrame, batch: pd.DataF
         elif not propagated[columns.index("exp_total")]:
             print(f"  ÉCHEC : modifier {game.nba_game_id} ne change pas le total attendu des matchs suivants (contrôle inopérant ?)")
             ok = False
+        if player_leaked:
+            print(f"  ÉCHEC : modifier {game.nba_game_id} change les entrées des joueurs de matchs antérieurs ou de lui-même : {player_leaked}")
+            ok = False
+        elif not player_propagated:
+            print(f"  ÉCHEC : modifier {game.nba_game_id} ne change les entrées d'aucun joueur des matchs suivants")
+            ok = False
     if ok:
-        print(f"  OK : {LEAK_GAMES} matchs de {season} inversés (total modifié), aucune feature antérieure modifiée, matchs suivants modifiés")
+        print(
+            f"  OK : {LEAK_GAMES} matchs de {season} inversés (total modifié), aucune feature ni entrée de joueur "
+            "antérieure modifiée, matchs suivants modifiés"
+        )
     return ok
 
 
@@ -296,6 +400,46 @@ def check_no_lineup_leakage(clean: pd.DataFrame, players: pd.DataFrame, batch: p
     return ok
 
 
+def check_no_player_leakage(clean: pd.DataFrame, players: pd.DataFrame, batch: pd.DataFrame, player_batch: pd.DataFrame) -> bool:
+    season, picked = leak_candidates(clean)
+    keyed = player_batch.set_index(PLAYER_KEYS)
+
+    ok = True
+    for game in picked.itertuples():
+        team = game.home_team_id
+        roster = players[(players["nba_game_id"] == game.nba_game_id) & (players["team_id"] == team)]
+        best = roster.loc[roster["min"].idxmax(), "player_id"]
+        inflated = players.copy()
+        line = (inflated["nba_game_id"] == game.nba_game_id) & (inflated["player_id"] == best)
+        for col, extra in INFLATED.items():
+            inflated.loc[line, col] += extra
+        rows = player_batch_rows(batch, clean, inflated)
+        leaked, _ = player_changes(player_batch, rows, game.game_date)
+
+        # Ligne du joueur au match suivant de son équipe : elle doit avoir changé.
+        following = keyed.loc[
+            (keyed.index.get_level_values("team_id") == team) & (keyed["game_date"] > game.game_date)
+        ].sort_values("game_date")
+        following = following[following["game_date"] == following["game_date"].min()]
+        key = (team, following.index.get_level_values("nba_game_id")[0], best)
+        propagated = key in following.index and bool(
+            changed(keyed, rows.set_index(PLAYER_KEYS), [key], PLAYER_COLS).any()
+        )
+
+        if leaked:
+            print(f"  ÉCHEC : gonfler la ligne du joueur {best} dans {game.nba_game_id} change des entrées antérieures ou du match : {leaked}")
+            ok = False
+        elif not propagated:
+            print(f"  ÉCHEC : gonfler la ligne du joueur {best} dans {game.nba_game_id} ne change pas ses entrées au match suivant")
+            ok = False
+    if ok:
+        print(
+            f"  OK : {LEAK_GAMES} matchs de {season}, ligne du joueur le plus utilisé gonflée : aucune entrée "
+            "antérieure modifiée, ses entrées au match suivant modifiées"
+        )
+    return ok
+
+
 def main():
     clean = pd.read_csv(CLEAN_PATH, parse_dates=["game_date"])
     players = load_player_games()
@@ -303,15 +447,18 @@ def main():
         model_columns = json.load(f)
     batch = build_features(clean, players)
     columns = candidate_feature_cols(batch) + SCORE_COLS
+    player_batch = player_batch_rows(batch, clean, players)
 
     print("0. game_features.csv à jour")
     results = [check_features_file_up_to_date(batch, columns, model_columns)]
     print("1. Cohérence entraînement / prédiction")
-    results.append(check_train_live_consistency(clean, players, batch, columns))
+    results.append(check_train_live_consistency(clean, players, batch, columns, player_batch))
     print("2. Absence de fuite temporelle")
-    results.append(check_no_leakage(clean, players, batch, columns))
+    results.append(check_no_leakage(clean, players, batch, columns, player_batch))
     print("3. Absence de fuite par l'effectif")
     results.append(check_no_lineup_leakage(clean, players, batch, columns))
+    print("4. Absence de fuite dans les statistiques des joueurs")
+    results.append(check_no_player_leakage(clean, players, batch, player_batch))
 
     if not all(results):
         sys.exit(1)

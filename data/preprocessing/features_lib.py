@@ -671,6 +671,313 @@ def score_range(points: float, half_width: float) -> tuple[int, int]:
 
 
 # ---------------------------------------------------------------------------
+# Statistiques des joueurs — partagé entre models/player_model.py (batch :
+# évaluation, modèle de minutes), team_state.py (état courant de chaque
+# joueur) et predictor_service.py (projections d'un match)
+# ---------------------------------------------------------------------------
+#
+# Projection d'un joueur pour un match, « s'il joue » (une espérance) :
+# - joueurs attendus : ceux du dernier match de l'équipe dans la saison
+#   (même hypothèse que lineup_delta : un absent du dernier match reste
+#   absent) ; aucun au premier match de la saison (effectifs inconnus) ;
+# - minutes : modèle appris (XGBoost, models/player_model.py) sur
+#   MINUTES_FEATURES ;
+# - autres stats : minutes × taux par minute attendu pour CE match. Taux du
+#   joueur = moyenne pondérée de ses matchs (demi-vie propre à chaque stat),
+#   ramenée vers le taux de la ligue de la saison précédente par
+#   `prior_minutes` minutes fictives (recrues, petits temps de jeu) ; × rythme
+#   du match (possessions attendues par les ratings de score / possessions
+#   moyennes des matchs du joueur) ; pour rebonds, passes, interceptions et
+#   contres, × (ce que l'adversaire concède / moyenne de la ligue) **
+#   opponent_exponent.
+#
+# Mesures et choix (2026-10-21, walk-forward 2021-22 -> 2025-26) : voir
+# models/player_model.py et CLAUDE.md, « Statistiques des joueurs ».
+
+PLAYER_STATS = ("min", "pts", "reb", "ast", "stl", "blk")
+COUNT_STATS = PLAYER_STATS[1:]
+OPPONENT_STATS = ("reb", "ast", "stl", "blk")
+
+
+@dataclass(frozen=True)
+class PlayerProjectionParams:
+    """Paramètres des projections des joueurs (voir models/tune_player_projections.py)."""
+    minutes_halflife: float       # demi-vie (en matchs) de la moyenne des minutes
+    minutes_long_halflife: float  # idem, tendance longue (entrée du modèle de minutes)
+    rates: dict                   # {stat: {"halflife": matchs, "prior_minutes": minutes fictives}}
+    opponent_halflife: float      # demi-vie de ce que concède chaque équipe
+    opponent_exponent: float      # poids de l'adversaire (0 : ignoré, 1 : proportionnel)
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+# Réglés le 2026-10-21 sur les saisons 2021-22 -> 2023-24 (erreur
+# quadratique, rodage 2016-17 -> 2020-21) : minutes sur les minutes, taux sur
+# « minutes réelles × taux ». Les stats rares (interceptions, contres)
+# demandent une fenêtre plus longue et plus de lissage. Comme pour l'Elo, les
+# changer impose de réentraîner puis de régénérer team_state.json (deploy
+# puis sync).
+DEFAULT_PLAYER_PARAMS = PlayerProjectionParams(
+    minutes_halflife=2.0,
+    minutes_long_halflife=10.0,
+    rates={
+        "pts": {"halflife": 10.0, "prior_minutes": 25.0},
+        "reb": {"halflife": 20.0, "prior_minutes": 25.0},
+        "ast": {"halflife": 10.0, "prior_minutes": 25.0},
+        "stl": {"halflife": 40.0, "prior_minutes": 200.0},
+        "blk": {"halflife": 40.0, "prior_minutes": 100.0},
+    },
+    opponent_halflife=20.0,
+    opponent_exponent=0.5,
+)
+
+
+def rate_halflives(params: PlayerProjectionParams = DEFAULT_PLAYER_PARAMS) -> list[float]:
+    return sorted({r["halflife"] for r in params.rates.values()})
+
+
+def player_state_cols(params: PlayerProjectionParams = DEFAULT_PLAYER_PARAMS) -> list[str]:
+    """Colonnes de l'état d'un joueur (player_form_timeline), stockées dans team_state.json."""
+    return (
+        ["minutes", "minutes_long", "last_minutes", "season_minutes", "last10_minutes", "games"]
+        + [f"ew_min_{h:g}" for h in rate_halflives(params)]
+        + [f"ew_poss_{h:g}" for h in rate_halflives(params)]
+        + [f"ew_{s}" for s in COUNT_STATS]
+    )
+
+
+# Entrées du modèle de minutes, dans cet ordre (player_projection_features).
+MINUTES_FEATURES = (
+    ["minutes", "minutes_long", "last_minutes", "season_minutes", "last10_minutes", "games",
+     "team_games", "rest_days", "is_home", "exp_possessions", "exp_total", "elo_win_probability",
+     "roster_size", "roster_minutes"]
+    + [f"rate_{s}" for s in COUNT_STATS]
+    + [f"formula_{s}" for s in COUNT_STATS]
+    + [f"opponent_factor_{s}" for s in OPPONENT_STATS]
+)
+
+
+def player_form_timeline(
+    player_games: pd.DataFrame, possessions: pd.Series, params: PlayerProjectionParams = DEFAULT_PLAYER_PARAMS,
+) -> pd.DataFrame:
+    """
+    État de chaque joueur APRÈS chacune de ses apparitions (toutes équipes,
+    saisons précédentes comprises) : c'est son état pour tout match d'une
+    date ultérieure. `possessions` : possessions de chaque match
+    (game_possessions), indexées par nba_game_id. Moyennes pondérées
+    exponentielles (ewm de pandas, demi-vie en matchs) ; ew_<stat> et
+    ew_min_<h> sont des SOMMES pondérées (numérateur et dénominateur d'un
+    taux par minute).
+
+    Colonnes : player_id, team_id, nba_game_id, game_date, season, player_name
+    (si présente) + player_state_cols(params).
+    """
+    p = player_games.sort_values(["player_id", "game_date", "nba_game_id"]).reset_index(drop=True)
+    p["reb"] = p["oreb"] + p["dreb"]
+    p["poss"] = p["nba_game_id"].map(possessions)
+    by_player = p.groupby("player_id")
+
+    def ew(col: str, halflife: float, how: str) -> pd.Series:
+        window = by_player[col].ewm(halflife=halflife)
+        values = window.mean() if how == "mean" else window.sum()
+        return values.reset_index(level=0, drop=True).sort_index()
+
+    keep = [c for c in ("player_id", "team_id", "nba_game_id", "game_date", "season", "player_name") if c in p]
+    out = p[keep].copy()
+    out["minutes"] = ew("min", params.minutes_halflife, "mean")
+    out["minutes_long"] = ew("min", params.minutes_long_halflife, "mean")
+    out["last_minutes"] = p["min"].astype(float)
+    by_season = p.groupby(["player_id", "season"])
+    out["season_minutes"] = by_season["min"].cumsum() / (by_season.cumcount() + 1)
+    out["last10_minutes"] = by_player["min"].rolling(10, min_periods=1).mean().reset_index(level=0, drop=True).sort_index()
+    out["games"] = (by_player.cumcount() + 1).astype(float)
+    for h in rate_halflives(params):
+        out[f"ew_min_{h:g}"] = ew("min", h, "sum")
+        out[f"ew_poss_{h:g}"] = ew("poss", h, "mean")
+    for s in COUNT_STATS:
+        out[f"ew_{s}"] = ew(s, params.rates[s]["halflife"], "sum")
+    return out
+
+
+def league_player_rates(player_games: pd.DataFrame) -> dict:
+    """Taux par minute de la ligue, par saison : {saison: {stat: total / minutes}}."""
+    totals = player_games.assign(reb=player_games["oreb"] + player_games["dreb"]).groupby("season")[
+        ["min", *COUNT_STATS]
+    ].sum()
+    return {
+        str(season): {s: float(row[s] / row["min"]) for s in COUNT_STATS}
+        for season, row in totals.iterrows()
+    }
+
+
+def team_allowed_long(df_games: pd.DataFrame) -> pd.DataFrame:
+    """Une ligne par équipe et par match : stats (OPPONENT_STATS) de son ADVERSAIRE dans ce match."""
+    frames = []
+    for side, other in (("home", "away"), ("away", "home")):
+        frame = df_games[["nba_game_id", "game_date", "season", f"{side}_team_id"]].rename(
+            columns={f"{side}_team_id": "team_id"}
+        )
+        for s in OPPONENT_STATS:
+            frame[f"allowed_{s}"] = pd.to_numeric(df_games[f"{other}_{s}"], errors="coerce")
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True).sort_values(["team_id", "game_date", "nba_game_id"]).reset_index(drop=True)
+
+
+def league_allowed(df_games: pd.DataFrame) -> dict:
+    """Moyenne par équipe et par match de chaque stat concédée, par saison : {saison: {stat: valeur}}."""
+    means = team_allowed_long(df_games).groupby("season")[[f"allowed_{s}" for s in OPPONENT_STATS]].mean()
+    return {str(season): {s: float(row[f"allowed_{s}"]) for s in OPPONENT_STATS} for season, row in means.iterrows()}
+
+
+def opponent_allowed_timeline(df_games: pd.DataFrame, params: PlayerProjectionParams = DEFAULT_PLAYER_PARAMS) -> pd.DataFrame:
+    """
+    Ce que chaque équipe concède (moyenne pondérée, demi-vie
+    opponent_halflife, toutes saisons), APRÈS chacun de ses matchs.
+    Colonnes : team_id, nba_game_id, game_date, opponent_allowed_<stat>.
+    """
+    long_df = team_allowed_long(df_games)
+    out = long_df[["team_id", "nba_game_id", "game_date"]].copy()
+    by_team = long_df.groupby("team_id")
+    for s in OPPONENT_STATS:
+        out[f"opponent_allowed_{s}"] = (
+            by_team[f"allowed_{s}"].ewm(halflife=params.opponent_halflife).mean()
+            .reset_index(level=0, drop=True).sort_index()
+        )
+    return out
+
+
+def previous_season_values(by_season: dict, season) -> dict:
+    """Valeurs de la dernière saison ANTÉRIEURE à `season` (la plus ancienne connue à défaut : début de l'historique)."""
+    earlier = [s for s in by_season if str(s) < str(season)]
+    return by_season[max(earlier)] if earlier else by_season[min(by_season)]
+
+
+def player_projection_features(df: pd.DataFrame, params: PlayerProjectionParams = DEFAULT_PLAYER_PARAMS) -> pd.DataFrame:
+    """
+    Complète des lignes « joueur attendu pour un match » (une ou plusieurs
+    équipes, clés team_id + nba_game_id) avec les taux attendus et les
+    entrées du modèle de minutes. Colonnes requises : player_state_cols()
+    (état d'avant-match), team_games, rest_days, is_home, exp_possessions,
+    exp_total, elo_win_probability, opponent_allowed_<stat>, et les valeurs
+    de la ligue league_rate_<stat> / league_allowed_<stat> (saison
+    précédente). Une valeur manquante (rythme ou adversaire inconnu) laisse
+    le taux inchangé ; le modèle de minutes accepte les NaN.
+
+    Ajoute rate_<stat> (taux du joueur), per_min_<stat> (taux attendu pour
+    ce match), formula_<stat> (minutes moyennes × per_min), opponent_factor_<stat>,
+    roster_size, roster_minutes.
+    """
+    out = df.copy()
+    for s in OPPONENT_STATS:
+        out[f"opponent_factor_{s}"] = (out[f"opponent_allowed_{s}"] / out[f"league_allowed_{s}"]).fillna(1.0)
+    for s in COUNT_STATS:
+        halflife, prior_minutes = params.rates[s]["halflife"], params.rates[s]["prior_minutes"]
+        rate = (out[f"ew_{s}"] + prior_minutes * out[f"league_rate_{s}"]) / (out[f"ew_min_{halflife:g}"] + prior_minutes)
+        per_min = rate * (out["exp_possessions"] / out[f"ew_poss_{halflife:g}"]).fillna(1.0)
+        if s in OPPONENT_STATS:
+            per_min = per_min * out[f"opponent_factor_{s}"] ** params.opponent_exponent
+        out[f"rate_{s}"] = rate
+        out[f"per_min_{s}"] = per_min
+        out[f"formula_{s}"] = out["minutes"] * per_min
+    roster = out.groupby(["team_id", "nba_game_id"])["minutes"]
+    out["roster_size"] = roster.transform("size").astype(float)
+    out["roster_minutes"] = roster.transform("sum")
+    return out
+
+
+def projected_stats(features: pd.DataFrame, minutes) -> pd.DataFrame:
+    """Stats projetées (PLAYER_STATS) : minutes du modèle (plancher 0) × taux attendus du match."""
+    out = pd.DataFrame({"min": np.maximum(np.asarray(minutes, dtype=float), 0.0)}, index=features.index)
+    for s in COUNT_STATS:
+        out[s] = out["min"] * features[f"per_min_{s}"]
+    return out
+
+
+def stat_ranges(table: dict, values) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Fourchettes (bornes entières incluses) d'une stat pour des valeurs
+    projetées : tranche de projection (table["edges"], bornes croissantes),
+    puis bornes de la tranche (table["bounds"], une paire par tranche,
+    models/player_model.fit_interval_table).
+    """
+    idx = np.searchsorted(np.asarray(table["edges"], dtype=float), np.asarray(values, dtype=float), side="right")
+    bounds = np.asarray(table["bounds"], dtype=float)
+    return bounds[idx, 0], bounds[idx, 1]
+
+
+def compute_player_rows(
+    df_games: pd.DataFrame, player_games: pd.DataFrame, params: PlayerProjectionParams = DEFAULT_PLAYER_PARAMS,
+) -> pd.DataFrame:
+    """
+    Version batch (entraînement, évaluation) : une ligne par équipe, match et
+    joueur attendu (joueurs du match précédent de l'équipe dans la saison),
+    avec l'état d'avant-match et player_projection_features(). Même calcul
+    que predictor_service.py à partir de team_state.json, vérifié par
+    check_features.py.
+
+    `df_games` : matchs avec boxscore d'équipe, exp_possessions / exp_total
+    (ratings de score) et home_elo / away_elo d'avant-match (game_features.csv
+    ou feature_engineering.build_features). `player_games` : feuilles joueur
+    limitées aux matchs de df_games (player_games.restrict_to_games).
+    """
+    possessions = pd.Series(game_possessions(df_games).to_numpy(), index=df_games["nba_game_id"].to_numpy())
+    timeline = player_form_timeline(player_games, possessions, params)
+    state_cols = player_state_cols(params)
+
+    # Matchs de chaque équipe : match précédent de la saison, repos, contexte.
+    cols = ["nba_game_id", "game_date", "season", "exp_possessions", "exp_total"]
+    p_home = elo_expected_home(df_games["home_elo"].to_numpy(dtype=float), df_games["away_elo"].to_numpy(dtype=float), DEFAULT_ELO_PARAMS)
+    sides = []
+    for side, other, p in (("home", "away", p_home), ("away", "home", 1 - p_home)):
+        frame = df_games[cols + [f"{side}_team_id", f"{other}_team_id"]].rename(
+            columns={f"{side}_team_id": "team_id", f"{other}_team_id": "opponent_id"}
+        )
+        frame["is_home"] = 1.0 if side == "home" else 0.0
+        frame["elo_win_probability"] = p
+        sides.append(frame)
+    tg = pd.concat(sides, ignore_index=True).sort_values(["team_id", "game_date", "nba_game_id"]).reset_index(drop=True)
+    tg["team_games"] = tg.groupby(["team_id", "season"]).cumcount().astype(float)
+    tg["previous_game_id"] = tg.groupby(["team_id", "season"])["nba_game_id"].shift(1)
+    tg["rest_days"] = tg.groupby("team_id")["game_date"].diff().dt.days.clip(upper=REST_DAYS_CAP)
+    tg = tg.dropna(subset=["previous_game_id"]).astype({"previous_game_id": "int64"})
+
+    # Joueurs attendus = joueurs du match précédent de l'équipe.
+    roster = player_games[["player_id", "team_id", "nba_game_id"]].rename(columns={"nba_game_id": "previous_game_id"})
+    rows = tg.merge(roster, on=["team_id", "previous_game_id"])
+
+    # État de chaque joueur après son dernier match strictement avant la date du match.
+    state = timeline[["player_id", "game_date"] + state_cols].rename(columns={"game_date": "state_date"})
+    rows = pd.merge_asof(
+        rows.sort_values("game_date"), state.sort_values("state_date"),
+        left_on="game_date", right_on="state_date", by="player_id", allow_exact_matches=False,
+    ).drop(columns="state_date")
+
+    # Ce que concède l'adversaire, après son match précédent.
+    allowed = opponent_allowed_timeline(df_games, params)
+    allowed_cols = [f"opponent_allowed_{s}" for s in OPPONENT_STATS]
+    allowed[allowed_cols] = allowed.groupby("team_id")[allowed_cols].shift(1)
+    rows = rows.merge(
+        allowed.drop(columns="game_date").rename(columns={"team_id": "opponent_id"}),
+        on=["opponent_id", "nba_game_id"], how="left",
+    )
+
+    # Valeurs de la ligue de la saison précédente.
+    rates_by_season = league_player_rates(player_games)
+    allowed_by_season = league_allowed(df_games)
+    for season, idx in rows.groupby("season").groups.items():
+        rates = previous_season_values(rates_by_season, season)
+        conceded = previous_season_values(allowed_by_season, season)
+        for s in COUNT_STATS:
+            rows.loc[idx, f"league_rate_{s}"] = rates[s]
+        for s in OPPONENT_STATS:
+            rows.loc[idx, f"league_allowed_{s}"] = conceded[s]
+
+    rows = rows.sort_values(["game_date", "nba_game_id", "team_id", "player_id"]).reset_index(drop=True)
+    return player_projection_features(rows, params)
+
+
+# ---------------------------------------------------------------------------
 # Explication des prédictions — partagée entre train_model.py (importance
 # globale de chaque famille) et predictor_service.py (facteurs d'un match)
 # ---------------------------------------------------------------------------

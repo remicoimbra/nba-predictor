@@ -31,6 +31,12 @@ fourchette à 80 % ; évalué lui aussi en walk-forward. Ses paramètres
 (sigma, demi-largeur de la fourchette, paramètres des ratings) sont écrits
 dans model_metrics.json (clé score_model), où l'API les lit.
 
+Statistiques des joueurs (player_model.py) : minutes de chaque joueur
+attendu par un modèle appris (XGBoost), autres stats = minutes × taux par
+minute attendus ; évaluées en walk-forward contre des moyennes simples. Le
+modèle de minutes est sauvegardé dans player_minutes.pkl, ses paramètres et
+les fourchettes dans model_metrics.json (clé player_model), lus par l'API.
+
 Usage :
     cd data
     python models/train_model.py
@@ -69,6 +75,14 @@ from evaluate_model import (
     summarize,
     walk_forward,
 )
+from player_model import (
+    load_players,
+    player_rows,
+    player_summary,
+    print_player_report,
+    served_player_model,
+    walk_forward_players,
+)
 from score_model import (
     INTERVAL_LEVEL,
     fit_score_params,
@@ -98,6 +112,7 @@ SERVED_MODEL = "logreg"  # modèle chargé par predictor_service.py
 # modèle servi part sur le VPS (deploy_to_vps.ps1) ; XGBoost est gardé pour
 # comparer ses prédictions en local.
 MODEL_FILES = {"logreg": "logreg.pkl", "xgboost": "xgboost.pkl"}
+PLAYER_MINUTES_FILE = "player_minutes.pkl"  # modèle de minutes des joueurs (servi, comme logreg.pkl)
 SAVED_XGBOOST_SEED = 42  # graine du XGBoost sauvegardé (celle de l'ancien protocole)
 
 # Motifs des VRAIES features générées par feature_engineering.py (toutes
@@ -342,6 +357,13 @@ def main():
     scores = score_summary(walk_forward_scores(df, feature_cols, spec_of[SERVED_MODEL]))
     print_score_report(scores)
 
+    print("\n=== Statistiques des joueurs, walk-forward (minutes apprises × taux par minute) ===")
+    players = load_players(df)
+    rows = player_rows(df, players)
+    player_oof = walk_forward_players(rows)
+    player_evaluation = player_summary(player_oof, rows, players)
+    print_player_report(player_evaluation)
+
     print(f"\n=== Ancien découpage (test {LEGACY_TEST_SEASON}, matchs complets, graine {LEGACY_SEED}) ===")
     legacy = legacy_split(df, feature_cols, specs)
     print_legacy(legacy)
@@ -377,7 +399,15 @@ def main():
         f"total de repli {score_model['fallback_total']:.1f}"
     )
 
+    minutes_model, player_block = served_player_model(rows, player_oof, player_evaluation)
+    print(
+        f"Statistiques des joueurs : modèle de minutes à {minutes_model.n_estimators} arbres "
+        f"({player_block['minutes_model']['train_rows']} lignes)"
+    )
+
     joblib.dump(logreg, MODEL_DIR / MODEL_FILES["logreg"])
+    # Le XGBRegressor lui-même, rechargé par predictor_service.py.
+    joblib.dump(minutes_model, MODEL_DIR / PLAYER_MINUTES_FILE)
     # Le XGBClassifier lui-même, pas l'enveloppe : le recharger ne doit pas
     # dépendre de ce module.
     joblib.dump(xgb.model_, MODEL_DIR / MODEL_FILES["xgboost"])
@@ -419,6 +449,9 @@ def main():
         # Lu par predictor_service.py (sigma, fallback_total, rating_params,
         # interval) : obligatoire.
         "score_model": score_model,
+        # Lu par predictor_service.py (params, minutes_features, intervals) :
+        # obligatoire, comme player_minutes.pkl.
+        "player_model": player_block,
     }
     with open(MODEL_DIR / "model_metrics.json", "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2, ensure_ascii=False)

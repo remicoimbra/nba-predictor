@@ -23,7 +23,7 @@ WEB_ROOT=/var/www/nba-predictor
 SERVICE=nba-predictor-api
 KEEP_RELEASES=3
 RELEASE=$(date +%Y%m%d-%H%M%S)
-MODEL_FILES=(logreg.pkl feature_columns.json model_metrics.json)
+MODEL_FILES=(logreg.pkl player_minutes.pkl feature_columns.json model_metrics.json)
 
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 

@@ -12,8 +12,11 @@ away_team_id), à partir de :
 - data/models/saved_models/feature_columns.json : ordre exact des colonnes
   attendu par le modèle (généré par train_model.py)
 - data/models/saved_models/model_metrics.json : paramètres du score prédit
-  (clé score_model : sigma, fourchette, paramètres des ratings de score) et
-  paramètres Elo de l'entraînement
+  (clé score_model : sigma, fourchette, paramètres des ratings de score),
+  des statistiques des joueurs (clé player_model : paramètres, fourchettes)
+  et paramètres Elo de l'entraînement
+- data/models/saved_models/player_minutes.pkl : modèle de minutes des
+  joueurs (XGBoost, voir data/models/player_model.py)
 
 Contrairement à feature_engineering.py (qui recalcule tout l'historique
 pour l'entraînement), ce module ne calcule QUE la ligne de features du
@@ -53,10 +56,15 @@ DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 sys.path.insert(0, str(DATA_DIR / "preprocessing"))
 
 from features_lib import (  # type: ignore[import-not-found]  # noqa: E402
+    COUNT_STATS,
     DEFAULT_ELO_PARAMS,
+    DEFAULT_PLAYER_PARAMS,
     DEFAULT_SCORE_RATING_PARAMS,
     ELO_INITIAL,
     FORM_WINDOW,
+    MINUTES_FEATURES,
+    OPPONENT_STATS,
+    PLAYER_STATS,
     ROLLING_WINDOWS,
     elo_expected_home,
     elo_for_target_season,
@@ -67,6 +75,8 @@ from features_lib import (  # type: ignore[import-not-found]  # noqa: E402
     linear_contributions,
     lineup_delta,
     net_rtg_from_boxscore,
+    player_projection_features,
+    projected_stats,
     rest_days,
     rolling_mean_last_n,
     rounded_score,
@@ -74,6 +84,7 @@ from features_lib import (  # type: ignore[import-not-found]  # noqa: E402
     score_rating_for_target_season,
     season_for_date,
     split_score,
+    stat_ranges,
     win_pct,
 )
 
@@ -83,6 +94,7 @@ TEAM_STATE_PATH = DATA_DIR / "processed" / "team_state.json"
 MODEL_PATH = DATA_DIR / "models" / "saved_models" / "logreg.pkl"
 FEATURE_COLUMNS_PATH = DATA_DIR / "models" / "saved_models" / "feature_columns.json"
 MODEL_METRICS_PATH = DATA_DIR / "models" / "saved_models" / "model_metrics.json"
+PLAYER_MINUTES_PATH = DATA_DIR / "models" / "saved_models" / "player_minutes.pkl"
 
 
 class PredictorNotReadyError(RuntimeError):
@@ -108,6 +120,7 @@ class GamePrediction:
     factors: list                  # [{key, label, contribution}] en log-odds, > 0 = favorise l'équipe à domicile
     base_value: float              # log-odds de départ du modèle (avant contributions)
     features_used: dict            # utile pour debug / affichage détaillé côté front
+    players: dict                  # {"home": [...], "away": [...]} : stats projetées des joueurs attendus
 
 
 class PredictorService:
@@ -125,11 +138,13 @@ class PredictorService:
         team_state_path: Path = TEAM_STATE_PATH,
         feature_columns_path: Path = FEATURE_COLUMNS_PATH,
         model_metrics_path: Path = MODEL_METRICS_PATH,
+        player_minutes_path: Path = PLAYER_MINUTES_PATH,
     ):
         self.model_path = model_path
         self.team_state_path = team_state_path
         self.feature_columns_path = feature_columns_path
         self.model_metrics_path = model_metrics_path
+        self.player_minutes_path = player_minutes_path
         # Typé Any plutôt que None : le modèle chargé (Pipeline scikit-learn
         # via joblib) n'a pas de type statique connu de Pylance ici, et un
         # attribut initialisé à None sans annotation ferait inférer
@@ -142,6 +157,8 @@ class PredictorService:
         self._team_state_mtime: float | None = None
         self._model_elo_params: dict | None = None
         self._score_model: dict = {}
+        self._player_model: dict = {}
+        self._minutes_model: Any = None
         self._load()
 
     def _load(self):
@@ -160,6 +177,11 @@ class PredictorService:
                 f"team_state.json introuvable : {self.team_state_path}. "
                 "Lancer data/preprocessing/team_state.py."
             )
+        if not self.player_minutes_path.exists():
+            raise PredictorNotReadyError(
+                f"Modèle de minutes des joueurs introuvable : {self.player_minutes_path}. "
+                "Relancer data/models/train_model.py."
+            )
 
         self._model = joblib.load(self.model_path)
         with open(self.feature_columns_path, encoding="utf-8") as f:
@@ -177,6 +199,17 @@ class PredictorService:
             raise PredictorNotReadyError(
                 "model_metrics.json sans score_model à jour (antérieur au 2026-10-21) : relancer train_model.py."
             )
+        # Statistiques des joueurs (train_model.py, player_model.py).
+        self._player_model = metrics.get("player_model") or {}
+        if not {"params", "minutes_features", "intervals"} <= self._player_model.keys():
+            raise PredictorNotReadyError(
+                "model_metrics.json sans player_model (antérieur aux statistiques des joueurs) : relancer train_model.py."
+            )
+        if self._player_model["minutes_features"] != MINUTES_FEATURES:
+            raise PredictorNotReadyError(
+                "Entrées du modèle de minutes différentes de features_lib.MINUTES_FEATURES : relancer train_model.py."
+            )
+        self._minutes_model = joblib.load(self.player_minutes_path)
         self._model_elo_params = metrics.get("elo_params")
         self.reload_team_state()
 
@@ -188,6 +221,7 @@ class PredictorService:
         self._team_state_mtime = mtime
         self._check_elo_params()
         self._check_score_rating_params()
+        self._check_player_params()
         if any("lineup" not in t for t in self._team_state.get("teams", {}).values()):
             # Fichier antérieur à l'étape 6 (déploiement sans synchro derrière) :
             # effectif traité comme « habituel » (lineup_delta = 0).
@@ -229,6 +263,21 @@ class PredictorService:
         }
         if any(params != sources["features_lib.py"] for params in sources.values()):
             logger.warning("Paramètres des ratings de score incohérents, totaux faussés : %s", sources)
+
+    def _check_player_params(self):
+        """Comme _check_elo_params(), pour les projections des joueurs."""
+        if "player_league" not in self._team_state:
+            # Fichier antérieur aux statistiques des joueurs (déploiement sans
+            # synchro derrière) : aucune projection de joueur.
+            logger.warning("team_state.json sans données joueur (pas de projections) : relancer sync_to_vps.ps1")
+            return
+        sources = {
+            "features_lib.py": DEFAULT_PLAYER_PARAMS.as_dict(),
+            "model_metrics.json": self._player_model["params"],
+            "team_state.json": self._team_state.get("as_of", {}).get("player_params"),
+        }
+        if any(params != sources["features_lib.py"] for params in sources.values()):
+            logger.warning("Paramètres des projections des joueurs incohérents, projections faussées : %s", sources)
 
     def reload_team_state_if_changed(self):
         """
@@ -425,12 +474,12 @@ class PredictorService:
             f["contribution"] = round(f["contribution"], 4)
         return factors, base_value
 
-    def expected_total(self, home_team_id: int, away_team_id: int, as_of_date=None) -> float | None:
+    def expected_game(self, home_team_id: int, away_team_id: int, as_of_date=None) -> tuple[float, float] | None:
         """
-        Total de points attendu d'après les ratings de score de team_state.json
-        (rythme × efficacité, voir features_lib), avec la régression de
-        changement de saison comme pour l'Elo. None si team_state.json n'a
-        pas encore les ratings.
+        (possessions, total de points) attendus d'après les ratings de score
+        de team_state.json (rythme × efficacité, voir features_lib), avec la
+        régression de changement de saison comme pour l'Elo. None si
+        team_state.json n'a pas encore les ratings.
         """
         as_of_date = as_of_date or self._team_state["as_of"]["last_game_date"]
         ratings = self._team_state.get("score_ratings")
@@ -443,7 +492,12 @@ class PredictorService:
             score_rating_for_target_season(t["score_rating"], known_season, target_season, DEFAULT_SCORE_RATING_PARAMS)
             for t in teams
         )
-        return expected_game(ratings["league"], home, away)[1]
+        return expected_game(ratings["league"], home, away)
+
+    def expected_total(self, home_team_id: int, away_team_id: int, as_of_date=None) -> float | None:
+        """Total de points attendu (voir expected_game), None sans ratings de score."""
+        game = self.expected_game(home_team_id, away_team_id, as_of_date)
+        return None if game is None else game[1]
 
     def scores(self, total: float | None, home_win_proba: float, home_favored: bool) -> tuple:
         """
@@ -462,10 +516,98 @@ class PredictorService:
         return rounded_score(home, away, home_favored), score_range(home, half_width), score_range(away, half_width)
 
     # ------------------------------------------------------------------
+    # Statistiques des joueurs
+    # ------------------------------------------------------------------
+
+    def player_rows(self, team_id: int, opponent_id: int, is_home: bool, as_of_date, context: dict) -> pd.DataFrame:
+        """
+        Entrées des projections des joueurs attendus de `team_id` (ceux de son
+        dernier match de la saison) pour ce match, comme
+        features_lib.compute_player_rows à l'entraînement : état des joueurs
+        (team_state.json) + contexte du match (`context` : exp_possessions,
+        exp_total, elo_win_probability de l'équipe). Vide en début de
+        nouvelle saison (effectifs inconnus, comme à l'entraînement) ou si
+        team_state.json n'a pas les données joueur.
+        """
+        as_of_date = as_of_date or self._team_state["as_of"]["last_game_date"]
+        team = self._get_team(team_id)
+        opponent = self._get_team(opponent_id)
+        league = self._team_state.get("player_league")
+        _, season_results, new_season = self._season_context(team, as_of_date)
+        if league is None or not team.get("players") or new_season:
+            return pd.DataFrame()
+
+        rows = pd.DataFrame(team["players"])
+        rows["team_id"] = team_id
+        rows["nba_game_id"] = 0  # un seul match : clé de regroupement de player_projection_features
+        rows["team_games"] = len(season_results["all"])
+        rows["rest_days"] = rest_days(team["last_game_date"], as_of_date)
+        rows["is_home"] = 1.0 if is_home else 0.0
+        for key, value in context.items():
+            rows[key] = value
+        allowed = opponent.get("opponent_allowed") or {}
+        for s in OPPONENT_STATS:
+            rows[f"opponent_allowed_{s}"] = allowed.get(s)
+            rows[f"league_allowed_{s}"] = league["allowed"][s]
+        for s in COUNT_STATS:
+            rows[f"league_rate_{s}"] = league["rates"][s]
+        numeric = [c for c in rows.columns if c != "name"]
+        rows[numeric] = rows[numeric].astype(float)  # None -> NaN
+        return player_projection_features(rows, DEFAULT_PLAYER_PARAMS)
+
+    def player_projections(self, rows: pd.DataFrame) -> list:
+        """
+        Stats projetées (minutes du modèle × taux attendus) et fourchettes
+        (tables de model_metrics.json) des joueurs de `rows` (player_rows),
+        par minutes décroissantes. Valeurs à 0,1 près, fourchettes en entiers.
+        """
+        if rows.empty:
+            return []
+        stats = projected_stats(rows, self._minutes_model.predict(rows[MINUTES_FEATURES]))
+        tables = self._player_model["intervals"]["tables"]
+        ranges = {s: stat_ranges(tables[s], stats[s]) for s in PLAYER_STATS}
+        players = []
+        for i, idx in enumerate(rows.index):
+            players.append({
+                "player_id": int(rows.at[idx, "player_id"]),
+                "name": rows.at[idx, "name"],
+                "games": int(rows.at[idx, "games"]),
+                "stats": {
+                    s: {"value": round(float(stats.at[idx, s]), 1), "range": [int(ranges[s][0][i]), int(ranges[s][1][i])]}
+                    for s in PLAYER_STATS
+                },
+            })
+        return sorted(players, key=lambda p: p["stats"]["min"]["value"], reverse=True)
+
+    def player_inputs(self, home_team_id: int, away_team_id: int, as_of_date=None) -> dict:
+        """
+        player_rows() des deux équipes ({"home": ..., "away": ...}), avec le
+        contexte du match : possessions et total attendus (expected_game),
+        probabilité Elo d'avant-match (régression de saison comprise).
+        """
+        as_of_date = as_of_date or self._team_state["as_of"]["last_game_date"]
+        game = self.expected_game(home_team_id, away_team_id, as_of_date)
+        elo_home, elo_away = (self._season_context(self._get_team(t), as_of_date)[0] for t in (home_team_id, away_team_id))
+        p_home = float(elo_expected_home(elo_home, elo_away, DEFAULT_ELO_PARAMS))
+        inputs = {}
+        for side, team_id, opponent_id, p in (
+            ("home", home_team_id, away_team_id, p_home),
+            ("away", away_team_id, home_team_id, 1 - p_home),
+        ):
+            context = {
+                "exp_possessions": None if game is None else game[0],
+                "exp_total": None if game is None else game[1],
+                "elo_win_probability": p,
+            }
+            inputs[side] = self.player_rows(team_id, opponent_id, side == "home", as_of_date, context)
+        return inputs
+
+    # ------------------------------------------------------------------
     # Prédiction
     # ------------------------------------------------------------------
 
-    def predict(self, home_team_id: int, away_team_id: int, as_of_date=None) -> GamePrediction:
+    def predict(self, home_team_id: int, away_team_id: int, as_of_date=None, with_players: bool = True) -> GamePrediction:
+        """`with_players=False` : sans les projections des joueurs (cartes de l'accueil), `players` vide."""
         row = self.build_feature_row(home_team_id, away_team_id, as_of_date)
 
         # Ordre des colonnes IMPOSÉ par feature_columns.json (généré à
@@ -494,6 +636,10 @@ class PredictorService:
         (home_score, away_score), home_range, away_range = self.scores(
             self.expected_total(home_team_id, away_team_id, as_of_date), home_win_proba, home_favored
         )
+        players = {
+            side: self.player_projections(rows)
+            for side, rows in self.player_inputs(home_team_id, away_team_id, as_of_date).items()
+        } if with_players else {}
 
         return GamePrediction(
             home_team_id=home_team_id,
@@ -509,6 +655,7 @@ class PredictorService:
             factors=factors,
             base_value=round(base_value, 4),
             features_used=row,
+            players=players,
         )
 
 

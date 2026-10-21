@@ -37,7 +37,7 @@ if (-not $VpsHost) { $VpsHost = "ubuntu@remicoimbra.fr" }
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $FrontDir = Join-Path $ProjectRoot "front"
 $ModelDir = Join-Path $ProjectRoot "data\models\saved_models"
-$ModelFiles = @("logreg.pkl", "feature_columns.json", "model_metrics.json")
+$ModelFiles = @("logreg.pkl", "player_minutes.pkl", "feature_columns.json", "model_metrics.json")
 # Fichiers de code envoyés : uniquement ceux suivis par git (pas de .env,
 # __pycache__ ou fichier de test égaré).
 $CodePaths = @("api/app", "api/requirements.txt", "data/preprocessing/features_lib.py")

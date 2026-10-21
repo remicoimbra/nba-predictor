@@ -24,7 +24,7 @@ def load_player_games(path: Path = RAW_PATH) -> pd.DataFrame:
     df = df.rename(columns={"game_id": "nba_game_id"})
     for col in ("nba_game_id", "team_id", "player_id"):
         df[col] = df[col].astype("int64")
-    for col in PLAYER_STAT_COLS:
+    for col in PLAYER_STAT_COLS + ["min"]:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
     return df.drop_duplicates(subset=["nba_game_id", "player_id"])
 

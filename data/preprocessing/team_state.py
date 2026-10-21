@@ -29,17 +29,27 @@ import numpy as np
 from features_lib import (
     BOX_SCORE_COLS,
     DEFAULT_ELO_PARAMS,
+    DEFAULT_PLAYER_PARAMS,
     DEFAULT_SCORE_RATING_PARAMS,
     LINEUP_TOP,
     LINEUP_WINDOW,
     NEUTRAL_SCORE_RATING,
+    OPPONENT_STATS,
     EloParams,
+    PlayerProjectionParams,
     ScoreRatingParams,
     compute_elo_timeline,
     compute_score_rating_timeline,
     elo_update,
+    game_possessions,
+    league_allowed,
+    league_player_rates,
     lineup_strength,
+    opponent_allowed_timeline,
+    player_form_timeline,
+    player_state_cols,
     player_value_timeline,
+    previous_season_values,
 )
 from player_games import coverage_warning, load_player_games, restrict_to_games
 
@@ -169,9 +179,53 @@ class _Lineups:
         return {"strengths": strengths, "absent": absent}
 
 
+def _json_float(value) -> float | None:
+    return None if pd.isna(value) else float(value)
+
+
+class _Players:
+    """
+    État COURANT de chaque joueur (après son dernier match, toutes équipes :
+    features_lib.player_form_timeline) et ce que concède chaque équipe après
+    son dernier match (features_lib.opponent_allowed_timeline) : les entrées
+    des projections des joueurs, complétées par l'API avec le contexte du
+    match (features_lib.player_projection_features).
+    """
+
+    def __init__(self, df_games: pd.DataFrame, player_games: pd.DataFrame, params: PlayerProjectionParams):
+        possessions = pd.Series(game_possessions(df_games).to_numpy(), index=df_games["nba_game_id"].to_numpy())
+        timeline = player_form_timeline(player_games, possessions, params)
+        # Dernière ligne de chaque joueur (pas groupby().last(), qui sauterait les NaN).
+        self.state = timeline.drop_duplicates("player_id", keep="last").set_index("player_id")
+        self.cols = player_state_cols(params)
+        self.players = player_games.groupby(["team_id", "nba_game_id"])["player_id"].apply(list).to_dict()
+        allowed = opponent_allowed_timeline(df_games, params)
+        self.allowed = allowed.drop_duplicates("team_id", keep="last").set_index("team_id")
+
+    def roster(self, team_id: int, last_game_id) -> list[dict]:
+        """Joueurs du dernier match de la saison (`last_game_id`, None : aucun), avec leur état."""
+        roster = self.players.get((team_id, last_game_id), []) if last_game_id is not None else []
+        out = []
+        for p in roster:
+            row = self.state.loc[p]
+            out.append({
+                "player_id": int(p),
+                "name": str(row.get("player_name", "")),
+                **{c: _json_float(row[c]) for c in self.cols},
+            })
+        return sorted(out, key=lambda r: r["minutes"] or 0.0, reverse=True)
+
+    def allowed_by(self, team_id: int) -> dict:
+        if team_id not in self.allowed.index:
+            return {s: None for s in OPPONENT_STATS}
+        row = self.allowed.loc[team_id]
+        return {s: _json_float(row[f"opponent_allowed_{s}"]) for s in OPPONENT_STATS}
+
+
 def build_team_state(
     df_games: pd.DataFrame, player_games: pd.DataFrame, params: EloParams = DEFAULT_ELO_PARAMS,
     score_params: ScoreRatingParams = DEFAULT_SCORE_RATING_PARAMS,
+    player_params: PlayerProjectionParams = DEFAULT_PLAYER_PARAMS,
 ) -> dict:
     """
     Construit l'état courant de chaque équipe à partir de l'historique
@@ -180,10 +234,14 @@ def build_team_state(
     Retourne un dict prêt à être sérialisé en JSON :
     {
       "as_of": {"last_game_date": "...", "season": "...", "generated_at": "...",
-                "elo_params": {...}},   # paramètres Elo du calcul (comparés par l'API à ceux du modèle)
+                "elo_params": {...},    # paramètres Elo du calcul (comparés par l'API à ceux du modèle)
+                "player_params": {...}},  # idem pour les projections des joueurs
       "score_ratings": {"params": {...}, "league": {"pace", "efficiency"}},
                                        # ratings de score (absent sans boxscore) : paramètres du
                                        # calcul et niveau de la ligue -> features_lib.expected_game()
+      "player_league": {"rates": {...}, "allowed": {...}},
+                                       # taux par minute et stats concédées de la ligue, saison
+                                       # précédente -> features_lib.player_projection_features()
       "teams": {
         "<team_id>": {
           "team_id": int,
@@ -202,6 +260,10 @@ def build_team_state(
                                        # force des LINEUP_WINDOW derniers effectifs de la saison,
                                        # valeurs des joueurs à ce jour -> features_lib.lineup_delta() ;
                                        # absent : joueurs habituels absents du dernier match (affichage)
+          "players": [...],           # joueurs du dernier match de la saison et leur état
+                                       # (features_lib.player_state_cols) -> projections de l'API
+          "opponent_allowed": {...}   # ce que concède l'équipe (rebonds, passes, interceptions,
+                                       # contres) -> projections des joueurs adverses
         },
         ...
       }
@@ -212,7 +274,9 @@ def build_team_state(
     score_timeline = compute_score_rating_timeline(df_games, score_params) if with_box_score else None
     long_df = _to_long_format(_with_elo_before_after(df_games, timeline.per_game, params), with_box_score)
     current_season = df_games.loc[df_games["game_date"].idxmax(), "season"]
-    lineups = _Lineups(restrict_to_games(player_games, df_games))
+    player_games = restrict_to_games(player_games, df_games)
+    lineups = _Lineups(player_games)
+    players = _Players(df_games, player_games, player_params) if with_box_score else None
 
     teams = {}
     for _, team_games in long_df.groupby("team_id"):
@@ -284,6 +348,10 @@ def build_team_state(
         if score_timeline is not None:
             rating = score_timeline.final_state.get(team_id_int, NEUTRAL_SCORE_RATING)
             teams[str(team_id_int)]["score_rating"] = {k: float(v) for k, v in rating.items()}
+        if players is not None:
+            season_game_ids = team_games.loc[season_mask, "nba_game_id"].tolist()
+            teams[str(team_id_int)]["players"] = players.roster(team_id_int, season_game_ids[-1] if season_game_ids else None)
+            teams[str(team_id_int)]["opponent_allowed"] = players.allowed_by(team_id_int)
 
     state = {
         "as_of": {
@@ -291,6 +359,7 @@ def build_team_state(
             "season": str(current_season),
             "generated_at": pd.Timestamp.now("UTC").isoformat(),
             "elo_params": params.as_dict(),
+            "player_params": player_params.as_dict(),
         },
         "teams": teams,
     }
@@ -298,6 +367,11 @@ def build_team_state(
         state["score_ratings"] = {
             "params": score_params.as_dict(),
             "league": {k: float(v) for k, v in score_timeline.league.items()},
+        }
+    if players is not None:
+        state["player_league"] = {
+            "rates": previous_season_values(league_player_rates(player_games), current_season),
+            "allowed": previous_season_values(league_allowed(df_games), current_season),
         }
     return state
 

@@ -7,7 +7,8 @@ Endpoints liés aux matchs :
 - /games/calendar   : dates synchronisées -> nombre de matchs (pastilles du
                       calendrier du front)
 - /games/{game_id}  : fiche complète d'un match (facteurs de la prédiction,
-                      stats comparées, forme récente, courbe Elo)
+                      stats comparées, forme récente, courbe Elo, stats
+                      projetées des joueurs)
 
 /games (liste) est dans la liste cible de CLAUDE.md mais pas encore développé.
 """
@@ -138,7 +139,9 @@ def _prediction(service: PredictorService, game: ScheduledGame, as_of_date, deta
     ligue, adversaire hors NBA en présaison).
     """
     try:
-        pred = service.predict(home_team_id=game.home_team.id, away_team_id=game.away_team.id, as_of_date=as_of_date)
+        pred = service.predict(
+            home_team_id=game.home_team.id, away_team_id=game.away_team.id, as_of_date=as_of_date, with_players=detailed,
+        )
     except UnknownTeamError as e:
         logger.warning("Prédiction impossible pour %s vs %s : %s", game.home_team.tricode, game.away_team.tricode, e)
         return None
@@ -156,6 +159,9 @@ def _prediction(service: PredictorService, game: ScheduledGame, as_of_date, deta
     if detailed:
         data["factors"] = pred.factors
         data["base_value"] = pred.base_value
+        # Stats projetées des joueurs attendus, par équipe (listes vides en
+        # début de saison : effectifs inconnus).
+        data["players"] = pred.players
     return data
 
 
@@ -235,7 +241,8 @@ def get_game(
     Fiche complète d'un match : prédiction + facteurs (contributions du modèle
     regroupées par famille), proba Elo seule, stats des deux équipes, 10
     derniers matchs, évolution Elo, joueurs habituels absents du dernier
-    match. 404 si le match est introuvable.
+    match, stats projetées des joueurs attendus (prediction.players). 404 si
+    le match est introuvable.
     """
     target_date = _parse_date(on_date)
     service = _require_predictor()
