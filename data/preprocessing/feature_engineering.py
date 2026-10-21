@@ -47,6 +47,13 @@ Feature "effectif" (étape 6, 2026-10-19) :
                                Négatif : des joueurs importants manquaient au
                                dernier match. Voir features_lib.py.
 
+Colonnes du score prédit (2026-10-21), PAS des features du modèle (ni
+préfixe home_/away_/diff_, ni motif de train_model.FEATURE_PATTERNS) :
+- exp_possessions, exp_total : possessions et total de points attendus
+                               d'après les ratings de score d'avant-match
+                               (features_lib.compute_score_rating_timeline),
+                               utilisés par models/score_model.py.
+
 Features différentielles (calculées une fois revenu au format 1-ligne-par-match) :
 - diff_win_pct, diff_win_pct_last10, diff_net_rtg_last5, diff_net_rtg_last10,
   diff_rest_days
@@ -75,6 +82,7 @@ from features_lib import (
     ROLLING_WINDOWS,
     compute_elo_timeline,
     compute_lineup_deltas,
+    compute_score_rating_timeline,
 )
 from player_games import coverage_warning, load_player_games, restrict_to_games
 
@@ -312,6 +320,8 @@ def build_features(df_games: pd.DataFrame, player_games: pd.DataFrame) -> pd.Dat
 
     elo_df = compute_elo_ratings(df_games)
     result = result.merge(elo_df, on="nba_game_id", how="left")
+    if with_box_score:
+        result = result.merge(compute_score_rating_timeline(df_games).per_game, on="nba_game_id", how="left")
 
     return add_diff_features(result, with_box_score)
 

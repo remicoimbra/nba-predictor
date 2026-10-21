@@ -438,32 +438,208 @@ def compute_lineup_deltas(team_games: pd.DataFrame, player_games: pd.DataFrame) 
 
 
 # ---------------------------------------------------------------------------
-# Score prédit — partagé entre models/score_model.py (évaluation, réglage de
-# sigma) et predictor_service.py (score affiché)
+# Ratings de score — total de points attendu, partagé entre
+# feature_engineering.py / team_state.py (batch) et predictor_service.py
 # ---------------------------------------------------------------------------
 #
-# Le modèle ne prédit que le vainqueur ; le score s'en déduit en deux temps :
-# - total des deux équipes : moyenne de l'attaque récente d'une équipe et de
-#   la défense récente de l'adversaire, pour chacune (SCORE_WINDOW matchs) ;
+# Total d'un match = possessions × points par possession. Deux notes par
+# équipe, mises à jour après chaque match comme l'Elo, donc ajustées aux
+# adversaires rencontrés (une moyenne brute des derniers matchs ne l'est
+# pas) :
+# - pace : possessions de ses matchs, au-dessus de la moyenne de la ligue ;
+# - scoring : points pour 100 possessions produits dans ses matchs (les
+#   deux équipes réunies), au-dessus de la moyenne. Élevé = attaque
+#   efficace et/ou défense perméable.
+# Le niveau de la ligue (possessions, points pour 100 possessions par
+# équipe) suit lui aussi les matchs : le jeu évolue (211 points par match
+# en 2016-17, 231 en 2025-26).
+#
+# Une seule note « scoring » plutôt qu'attaque et défense : pour le TOTAL,
+# seule compte la différence attaque − défense de chaque équipe (vérifié le
+# 2026-10-21 : séparées, elles donnent les mêmes totaux à l'identique, et
+# l'avantage du terrain n'y joue aucun rôle). L'écart vient de la
+# probabilité du modèle (expected_margin).
+#
+# Réglage et évaluation (2026-10-21) : models/tune_score_ratings.py et
+# models/score_model.py.
+
+
+@dataclass(frozen=True)
+class ScoreRatingParams:
+    """Paramètres réglables des ratings de score (voir models/tune_score_ratings.py)."""
+    k_pace: float             # part de l'écart de possessions reportée sur la note de rythme
+    k_scoring: float          # idem pour l'écart de points pour 100 possessions
+    season_regression: float  # part de régression des notes vers 0 entre 2 saisons
+    league_rate: float        # vitesse de suivi du niveau de la ligue
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+# Réglés le 2026-10-21 sur la MAE du total des saisons 2021-22 -> 2023-24.
+# Comme pour l'Elo, les changer impose de régénérer game_features.csv, de
+# réentraîner, puis de régénérer team_state.json (deploy puis sync).
+DEFAULT_SCORE_RATING_PARAMS = ScoreRatingParams(k_pace=0.04, k_scoring=0.03, season_regression=0.5, league_rate=0.01)
+
+# Point de départ (premier match de l'historique, 2016-17), proche de la
+# réalité de l'époque et oublié pendant les saisons de rodage : il n'est pas
+# estimé sur les matchs eux-mêmes.
+LEAGUE_INITIAL = {"pace": 100.0, "efficiency": 106.0}
+NEUTRAL_SCORE_RATING = {"pace": 0.0, "scoring": 0.0}  # équipe moyenne (ou jamais vue)
+
+
+def game_possessions(df: pd.DataFrame) -> pd.Series:
+    """
+    Possessions d'un match : moyenne des estimations des deux équipes
+    (FGA + 0,44 FTA - OREB + TOV, la formule usuelle). Différente de celle
+    de net_rtg_from_boxscore (0,4, une seule équipe), feature du modèle
+    qu'on ne modifie pas.
+    """
+    def team(side: str) -> pd.Series:
+        return df[f"{side}_fga"] + 0.44 * df[f"{side}_fta"] - df[f"{side}_oreb"] + df[f"{side}_tov"]
+    return (team("home") + team("away")) / 2
+
+
+def expected_game(league: dict, home: dict, away: dict) -> tuple[float, float]:
+    """(possessions, total de points) attendus, à partir des notes d'avant-match."""
+    pace = league["pace"] + home["pace"] + away["pace"]
+    return pace, pace * (2 * league["efficiency"] + home["scoring"] + away["scoring"]) / 100
+
+
+def score_rating_errors(
+    league: dict, home: dict, away: dict, possessions: float, total_points: float,
+) -> tuple[float, float]:
+    """Écarts d'UN match à sa prévision : (possessions, points pour 100 possessions des deux équipes)."""
+    pace, _ = expected_game(league, home, away)
+    efficiency = 2 * league["efficiency"] + home["scoring"] + away["scoring"]
+    return possessions - pace, 100 * total_points / possessions - efficiency
+
+
+def team_rating_update(
+    rating: dict, pace_error: float, efficiency_error: float, params: ScoreRatingParams = DEFAULT_SCORE_RATING_PARAMS,
+) -> dict:
+    """Notes d'une équipe après un match (fonction pure)."""
+    return {
+        "pace": rating["pace"] + params.k_pace * pace_error,
+        "scoring": rating["scoring"] + params.k_scoring * efficiency_error,
+    }
+
+
+def league_update(
+    league: dict, pace_errors: float, efficiency_errors: float, params: ScoreRatingParams = DEFAULT_SCORE_RATING_PARAMS,
+) -> dict:
+    """
+    Niveau de la ligue après une JOURNÉE (écarts de ses matchs sommés). Pas
+    après chaque match : sinon un match du soir changerait la prévision d'un
+    autre match du même soir, ce qui est impossible en production (la
+    synchro a lieu le matin).
+    """
+    return {
+        "pace": league["pace"] + params.league_rate * pace_errors,
+        "efficiency": league["efficiency"] + params.league_rate * efficiency_errors / 2,
+    }
+
+
+def regress_score_rating(rating: dict, params: ScoreRatingParams = DEFAULT_SCORE_RATING_PARAMS) -> dict:
+    """Régression partielle des notes d'une équipe vers la moyenne (0), au changement de saison."""
+    return {key: (1 - params.season_regression) * value for key, value in rating.items()}
+
+
+def score_rating_for_target_season(
+    rating: dict, last_known_season, target_season, params: ScoreRatingParams = DEFAULT_SCORE_RATING_PARAMS,
+) -> dict:
+    """Comme elo_for_target_season() : régression si le match tombe dans une saison postérieure."""
+    if is_later_season(target_season, last_known_season):
+        return regress_score_rating(rating, params)
+    return rating
+
+
+@dataclass
+class ScoreRatingTimeline:
+    """Résultat du passage séquentiel sur tout l'historique."""
+    per_game: pd.DataFrame  # nba_game_id, exp_possessions, exp_total (AVANT le match)
+    final_state: dict       # {team_id: {"pace", "scoring"}} après le dernier match connu
+    league: dict            # niveau de la ligue après la dernière journée connue
+    params: ScoreRatingParams
+
+
+def compute_score_rating_timeline(
+    df_games: pd.DataFrame, params: ScoreRatingParams = DEFAULT_SCORE_RATING_PARAMS,
+) -> ScoreRatingTimeline:
+    """
+    Notes de rythme et de points match après match, dans l'ordre
+    chronologique (même principe que compute_elo_timeline : la prévision
+    d'un match est enregistrée AVANT de le prendre en compte ; le niveau de
+    la ligue, partagé par tous les matchs, n'est mis à jour qu'en fin de
+    journée). Un match sans score ou sans boxscore laisse les notes
+    inchangées.
+    """
+    missing = [f"{side}_{c}" for side in ("home", "away") for c in BOX_SCORE_COLS if f"{side}_{c}" not in df_games]
+    if missing:
+        raise ValueError(f"Boxscore requis pour les ratings de score, colonnes absentes : {missing}")
+
+    df = df_games.sort_values(["game_date", "nba_game_id"]).reset_index(drop=True)
+    dates = df["game_date"].to_numpy()
+    seasons = df["season"].to_numpy()
+    home_ids = df["home_team_id"].to_numpy()
+    away_ids = df["away_team_id"].to_numpy()
+    totals = (pd.to_numeric(df["home_score"], errors="coerce") + pd.to_numeric(df["away_score"], errors="coerce")).to_numpy(dtype=float)
+    possessions = game_possessions(df).to_numpy(dtype=float)
+
+    league = dict(LEAGUE_INITIAL)
+    ratings: dict = {}
+    current_season = None
+    current_date = None
+    day_errors = [0.0, 0.0]  # écarts (possessions, efficacité) sommés sur la journée en cours
+    exp_possessions = np.empty(len(df))
+    exp_total = np.empty(len(df))
+
+    for i in range(len(df)):
+        if dates[i] != current_date:
+            league = league_update(league, *day_errors, params)
+            day_errors = [0.0, 0.0]
+            current_date = dates[i]
+        if seasons[i] != current_season:
+            if current_season is not None:
+                ratings = {team: regress_score_rating(r, params) for team, r in ratings.items()}
+            current_season = seasons[i]
+
+        home = ratings.get(home_ids[i], NEUTRAL_SCORE_RATING)
+        away = ratings.get(away_ids[i], NEUTRAL_SCORE_RATING)
+        exp_possessions[i], exp_total[i] = expected_game(league, home, away)
+
+        if np.isnan(totals[i]) or not possessions[i] > 0:
+            continue
+        pace_error, efficiency_error = score_rating_errors(league, home, away, possessions[i], totals[i])
+        ratings[home_ids[i]] = team_rating_update(home, pace_error, efficiency_error, params)
+        ratings[away_ids[i]] = team_rating_update(away, pace_error, efficiency_error, params)
+        day_errors[0] += pace_error
+        day_errors[1] += efficiency_error
+    league = league_update(league, *day_errors, params)  # dernière journée
+
+    per_game = pd.DataFrame({
+        "nba_game_id": df["nba_game_id"],
+        "exp_possessions": exp_possessions,
+        "exp_total": exp_total,
+    })
+    return ScoreRatingTimeline(per_game=per_game, final_state=ratings, league=league, params=params)
+
+
+# ---------------------------------------------------------------------------
+# Score prédit — partagé entre models/score_model.py (évaluation, réglage de
+# sigma et de la fourchette) et predictor_service.py (score affiché)
+# ---------------------------------------------------------------------------
+#
+# - total des deux équipes : ratings de score ci-dessus (exp_total) ;
 # - écart : sigma * Φ⁻¹(p), p étant la probabilité de victoire à domicile
 #   du modèle servi. Si l'écart final suit une loi normale de moyenne mu et
 #   d'écart-type sigma, alors p = Φ(mu / sigma), donc mu = sigma * Φ⁻¹(p).
-#   Le vainqueur du score est donc toujours le favori du modèle.
-# Évaluation et choix (2026-10-19) : voir models/score_model.py.
+#   Le vainqueur du score est donc toujours le favori du modèle ;
+# - fourchette : ± une demi-largeur fixe autour des points de chaque équipe,
+#   qui contient le vrai score dans 80 % des cas (mesuré en walk-forward).
+# Évaluation et choix : voir models/score_model.py.
 
-SCORE_WINDOW = 10
 PROBABILITY_CLIP = 1e-6  # évite Φ⁻¹(0) = -inf
-
-
-def expected_total(home_scored, home_allowed, away_scored, away_allowed):
-    """
-    Total de points attendu à partir des moyennes récentes (marqués /
-    encaissés) des deux équipes. Accepte scalaires ou tableaux ; None/NaN
-    si une moyenne manque.
-    """
-    if any(v is None for v in (home_scored, home_allowed, away_scored, away_allowed)):
-        return None
-    return (home_scored + away_allowed) / 2 + (away_scored + home_allowed) / 2
 
 
 def expected_margin(home_probability, sigma: float):
@@ -487,6 +663,11 @@ def rounded_score(home: float, away: float, home_favored: bool) -> tuple[int, in
     if h == a:
         h, a = (h + 1, a) if home_favored else (h, a + 1)
     return h, a
+
+
+def score_range(points: float, half_width: float) -> tuple[int, int]:
+    """Fourchette affichée autour des points (non arrondis) d'une équipe, en entiers."""
+    return int(round(points - half_width)), int(round(points + half_width))
 
 
 # ---------------------------------------------------------------------------

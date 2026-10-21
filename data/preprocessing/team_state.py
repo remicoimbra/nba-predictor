@@ -29,10 +29,14 @@ import numpy as np
 from features_lib import (
     BOX_SCORE_COLS,
     DEFAULT_ELO_PARAMS,
+    DEFAULT_SCORE_RATING_PARAMS,
     LINEUP_TOP,
     LINEUP_WINDOW,
+    NEUTRAL_SCORE_RATING,
     EloParams,
+    ScoreRatingParams,
     compute_elo_timeline,
+    compute_score_rating_timeline,
     elo_update,
     lineup_strength,
     player_value_timeline,
@@ -167,6 +171,7 @@ class _Lineups:
 
 def build_team_state(
     df_games: pd.DataFrame, player_games: pd.DataFrame, params: EloParams = DEFAULT_ELO_PARAMS,
+    score_params: ScoreRatingParams = DEFAULT_SCORE_RATING_PARAMS,
 ) -> dict:
     """
     Construit l'état courant de chaque équipe à partir de l'historique
@@ -176,10 +181,15 @@ def build_team_state(
     {
       "as_of": {"last_game_date": "...", "season": "...", "generated_at": "...",
                 "elo_params": {...}},   # paramètres Elo du calcul (comparés par l'API à ceux du modèle)
+      "score_ratings": {"params": {...}, "league": {"pace", "efficiency"}},
+                                       # ratings de score (absent sans boxscore) : paramètres du
+                                       # calcul et niveau de la ligue -> features_lib.expected_game()
       "teams": {
         "<team_id>": {
           "team_id": int,
           "elo": float,               # état final -> features_lib.current_elo_for_prediction()
+          "score_rating": {"pace", "scoring"}
+                                       # état final -> features_lib.score_rating_for_target_season()
           "last_game_date": "...",    # -> features_lib.rest_days()
           "recent_games": [...],      # jusqu'à MAX_RECENT_GAMES, plus ancien -> plus récent
                                        # -> features_lib.rolling_mean_last_n() / net_rtg_from_boxscore()
@@ -199,6 +209,7 @@ def build_team_state(
     """
     with_box_score = has_box_score(df_games)
     timeline = compute_elo_timeline(df_games, params)
+    score_timeline = compute_score_rating_timeline(df_games, score_params) if with_box_score else None
     long_df = _to_long_format(_with_elo_before_after(df_games, timeline.per_game, params), with_box_score)
     current_season = df_games.loc[df_games["game_date"].idxmax(), "season"]
     lineups = _Lineups(restrict_to_games(player_games, df_games))
@@ -270,8 +281,11 @@ def build_team_state(
             "elo_history": elo_history,
             "lineup": lineups.state(team_id_int, team_games.loc[season_mask, "nba_game_id"].tolist()),
         }
+        if score_timeline is not None:
+            rating = score_timeline.final_state.get(team_id_int, NEUTRAL_SCORE_RATING)
+            teams[str(team_id_int)]["score_rating"] = {k: float(v) for k, v in rating.items()}
 
-    return {
+    state = {
         "as_of": {
             "last_game_date": df_games["game_date"].max().strftime("%Y-%m-%d"),
             "season": str(current_season),
@@ -280,6 +294,12 @@ def build_team_state(
         },
         "teams": teams,
     }
+    if score_timeline is not None:
+        state["score_ratings"] = {
+            "params": score_params.as_dict(),
+            "league": {k: float(v) for k, v in score_timeline.league.items()},
+        }
+    return state
 
 
 def main():

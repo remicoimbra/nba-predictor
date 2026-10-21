@@ -25,9 +25,11 @@ la baisse (evaluate_model.SEASON_HALF_LIFE). C'est la situation que simule
 chaque pli du walk-forward (prédire la saison suivante avec tout le passé
 connu), et le modèle servi profite de la saison la plus récente.
 
-Score prédit : déduit de la probabilité du modèle servi (score_model.py),
-évalué lui aussi en walk-forward ; son paramètre sigma est écrit dans
-model_metrics.json (clé score_model), où l'API le lit.
+Score prédit (score_model.py) : total d'après les ratings de score
+(rythme × efficacité), écart déduit de la probabilité du modèle servi,
+fourchette à 80 % ; évalué lui aussi en walk-forward. Ses paramètres
+(sigma, demi-largeur de la fourchette, paramètres des ratings) sont écrits
+dans model_metrics.json (clé score_model), où l'API les lit.
 
 Usage :
     cd data
@@ -68,7 +70,8 @@ from evaluate_model import (
     walk_forward,
 )
 from score_model import (
-    fit_sigma,
+    INTERVAL_LEVEL,
+    fit_score_params,
     latest_season_total,
     print_score_report,
     score_summary,
@@ -78,7 +81,7 @@ from score_model import (
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "preprocessing"))
 from features_lib import (  # type: ignore[import-not-found]  # noqa: E402
     DEFAULT_ELO_PARAMS,
-    SCORE_WINDOW,
+    DEFAULT_SCORE_RATING_PARAMS,
     elo_expected_home,
     factor_family,
     linear_contributions,
@@ -357,13 +360,22 @@ def main():
     for f in importances:
         print(f"  {f['label']:<28} {f['share']:6.1%}  (|contribution| moyenne {f['mean_abs_contribution']:.3f})")
     served_model = {"logreg": logreg, "xgboost": xgb}[SERVED_MODEL]
+    sigma, half_width = fit_score_params(served_model, train, feature_cols)
     score_model = {
-        "sigma": fit_sigma(served_model, train, feature_cols),
+        "sigma": sigma,
+        # Total servi tant que team_state.json n'a pas les ratings de score
+        # (déploiement pas encore suivi d'une synchro).
         "fallback_total": latest_season_total(df),
-        "window": SCORE_WINDOW,
+        # Ceux de game_features.csv (= ceux du code, contrôlé par
+        # check_features.py), comparés par l'API à ceux de team_state.json.
+        "rating_params": DEFAULT_SCORE_RATING_PARAMS.as_dict(),
+        "interval": {"level": INTERVAL_LEVEL, "half_width": half_width},
         "evaluation": scores,
     }
-    print(f"\nScore prédit : sigma {score_model['sigma']:.2f}, total de repli {score_model['fallback_total']:.1f}")
+    print(
+        f"\nScore prédit : sigma {sigma:.2f}, fourchette à {INTERVAL_LEVEL:.0%} ±{half_width:.1f} pts, "
+        f"total de repli {score_model['fallback_total']:.1f}"
+    )
 
     joblib.dump(logreg, MODEL_DIR / MODEL_FILES["logreg"])
     # Le XGBClassifier lui-même, pas l'enveloppe : le recharger ne doit pas
@@ -404,7 +416,8 @@ def main():
         "evaluation": evaluation,
         "factor_importances": importances,
         "calibration": calibration_curve(oof, SERVED_MODEL),
-        # Lu par predictor_service.py (sigma, fallback_total) : obligatoire.
+        # Lu par predictor_service.py (sigma, fallback_total, rating_params,
+        # interval) : obligatoire.
         "score_model": score_model,
     }
     with open(MODEL_DIR / "model_metrics.json", "w", encoding="utf-8") as f:

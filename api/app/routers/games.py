@@ -149,6 +149,8 @@ def _prediction(service: PredictorService, game: ScheduledGame, as_of_date, deta
         "predicted_winner": pred.predicted_winner,
         "predicted_home_score": pred.predicted_home_score,
         "predicted_away_score": pred.predicted_away_score,
+        "predicted_home_score_range": pred.predicted_home_score_range,
+        "predicted_away_score_range": pred.predicted_away_score_range,
         "elo_home_probability": pred.elo_home_probability,
     }
     if detailed:
