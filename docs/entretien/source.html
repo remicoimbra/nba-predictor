@@ -1,0 +1,1319 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>NBA Predictor – Préparation aux entretiens</title>
+<style>
+  @page {
+    size: A4;
+    margin: 14mm 16mm 16mm 16mm;
+    @bottom-right { content: counter(page); font: 9pt "Segoe UI", sans-serif; color: #6b7280; }
+    @bottom-left { content: "NBA Predictor · préparation aux entretiens"; font: 8.5pt "Segoe UI", sans-serif; color: #9ca3af; }
+  }
+  @page :first {
+    @bottom-right { content: none; }
+    @bottom-left { content: none; }
+  }
+  :root {
+    --blue: #17408B;
+    --blue-2: #2b5bb8;
+    --blue-bg: #eef3fb;
+    --red: #C9082A;
+    --red-bg: #fdf0f2;
+    --ink: #1f2430;
+    --ink-2: #4b5363;
+    --line: #d7dde8;
+    --code-bg: #f5f7fb;
+    --green-bg: #eef8f1;
+    --green: #1d7a3e;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    margin: 0;
+    background: #fff;
+    color: var(--ink);
+    font: 9.7pt/1.44 "Segoe UI", "Segoe UI Variable", Calibri, Arial, sans-serif;
+  }
+  .chap { margin-top: 11mm; }
+  .chap.newpage { break-before: page; margin-top: 0; }
+  h1 {
+    break-after: avoid;
+    font-size: 19pt; line-height: 1.15; margin: 0 0 4mm; color: var(--blue);
+    display: flex; align-items: baseline; gap: 3mm;
+    border-bottom: 2px solid var(--blue); padding-bottom: 2mm;
+  }
+  h1 .num {
+    font-size: 12pt; color: #fff; background: var(--red); border-radius: 4px;
+    padding: 0.4mm 2.2mm; position: relative; top: -1mm;
+  }
+  h2 { font-size: 12.5pt; color: var(--blue); margin: 5mm 0 1.5mm; break-after: avoid; }
+  h3 { font-size: 10.5pt; margin: 3.5mm 0 1mm; color: var(--ink); break-after: avoid; }
+  p { margin: 0 0 2.2mm; }
+  ul, ol { margin: 0 0 2.5mm; padding-left: 5.5mm; }
+  li { margin-bottom: 0.8mm; }
+  .lead { font-size: 11pt; color: var(--ink-2); }
+  code, .mono { font-family: Consolas, "Cascadia Mono", monospace; font-size: 8.9pt; background: var(--code-bg); padding: 0 0.3mm; border-radius: 2px; }
+  pre {
+    font-family: Consolas, "Cascadia Mono", monospace; font-size: 8.6pt; line-height: 1.42;
+    background: var(--code-bg); border: 1px solid var(--line); border-left: 3px solid var(--blue);
+    border-radius: 4px; padding: 2.5mm 3.5mm; margin: 1.5mm 0 3mm; white-space: pre-wrap;
+    break-inside: avoid;
+  }
+  pre .c { color: #6b7280; font-style: italic; }
+  pre .n { color: #fff; background: var(--red); border-radius: 50%; font-style: normal; font-size: 7.5pt; padding: 0 1.1mm; font-weight: 700; }
+  .file { font-size: 8.5pt; color: var(--ink-2); margin: 3mm 0 -0.5mm; font-family: Consolas, monospace; break-after: avoid; }
+  table.t { width: 100%; border-collapse: collapse; margin: 1.5mm 0 3.5mm; font-size: 9.2pt; break-inside: avoid; }
+  table.t th { text-align: left; background: var(--blue); color: #fff; font-weight: 600; padding: 1.4mm 2mm; }
+  table.t td { padding: 1.3mm 2mm; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.t tr:nth-child(even) td { background: #f8f9fc; }
+  table.t tr.hl td { background: var(--blue-bg); font-weight: 600; }
+  table.t td.r, table.t th.r { text-align: right; white-space: nowrap; }
+  table.t.files td:first-child { font-family: Consolas, monospace; font-size: 8.4pt; white-space: nowrap; }
+  table.t.long { break-inside: auto; }
+  table.t.long td { padding-top: 1mm; padding-bottom: 1mm; }
+  table.t tr { break-inside: avoid; }
+  table.t tr.group td { background: #e4e9f3; font-weight: 700; color: var(--blue); font-family: inherit; font-size: 9.2pt; }
+  p, li { orphans: 3; widows: 3; }
+  .lead, .keep { break-after: avoid; }
+  .box { border-radius: 5px; padding: 2.6mm 4mm; margin: 3mm 0; break-inside: avoid; }
+  .box > :last-child { margin-bottom: 0; }
+  .box-title { font-weight: 700; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 1mm; }
+  .retenir { background: var(--blue-bg); border-left: 4px solid var(--blue); }
+  .retenir .box-title { color: var(--blue); }
+  .oral { background: var(--red-bg); border-left: 4px solid var(--red); }
+  .oral .box-title { color: var(--red); }
+  .piege { background: #fff8e8; border-left: 4px solid #b7791f; }
+  .piege .box-title { color: #8a5a12; }
+  .def { margin: 0 0 2mm; }
+  .def b { color: var(--blue); }
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2.5mm; margin: 3mm 0; }
+  .tile { border: 1px solid var(--line); border-radius: 5px; padding: 2mm 3mm; }
+  .tile .v { font-size: 17pt; font-weight: 700; color: var(--blue); line-height: 1.1; }
+  .tile .l { font-size: 8.8pt; color: var(--ink-2); }
+  .shotfig { break-inside: avoid; margin: 2mm 0 3mm; }
+  .shotfig.narrow .shot { width: 82%; margin-left: auto; margin-right: auto; }
+  .shotfig.narrow .caption { text-align: center; }
+  .shot { border: 1px solid var(--line); border-radius: 5px; overflow: hidden; margin: 0 0 1mm; }
+  .shot img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .caption { font-size: 8.5pt; color: var(--ink-2); margin: 0 0 3mm; }
+  figure { margin: 2mm 0 3mm; break-inside: avoid; }
+  figure svg { display: block; width: 100%; height: auto; }
+  figcaption { font-size: 8.5pt; color: var(--ink-2); margin-top: 1mm; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; }
+  .formula { text-align: center; font-family: "Cambria Math", Cambria, Georgia, serif; font-size: 11.5pt; margin: 2mm 0 3mm; padding: 2mm; background: #fafbfd; border: 1px dashed var(--line); border-radius: 4px; break-inside: avoid; }
+  .bars { margin: 2mm 0 3mm; break-inside: avoid; }
+  .bar { display: grid; grid-template-columns: 42mm 1fr 13mm; align-items: center; gap: 2mm; font-size: 9pt; margin-bottom: 1mm; }
+  .bar .track { background: #edf0f6; height: 3.2mm; border-radius: 2px; }
+  .bar .fill { background: var(--blue-2); height: 100%; border-radius: 2px; }
+  .bar .pct { text-align: right; font-weight: 600; }
+  ol.notes { font-size: 9.3pt; }
+  ol.notes li::marker { color: var(--red); font-weight: 700; }
+  .qa { break-inside: avoid; margin: 0 0 3mm; }
+  .qa .q { font-weight: 700; color: var(--blue); margin-bottom: 0.6mm; }
+  .qa .q::before { content: "Q. "; color: var(--red); }
+  .qa .a { margin: 0; padding-left: 4mm; border-left: 2px solid var(--line); }
+  .qa .a + .a { margin-top: 1mm; }
+  .qa-group { font-size: 11pt; color: var(--red); margin: 4.5mm 0 2mm; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; break-after: avoid; }
+  .gloss { column-count: 2; column-gap: 7mm; font-size: 8.9pt; line-height: 1.4; }
+  .gloss p { break-inside: avoid; margin: 0 0 1.7mm; }
+  .gloss b { color: var(--blue); }
+  .small { font-size: 8.8pt; color: var(--ink-2); }
+  /* Couverture */
+  .cover { height: 262mm; display: flex; flex-direction: column; }
+  .cover .stripe { height: 5mm; background: linear-gradient(90deg, var(--blue) 0 50%, var(--red) 50% 100%); border-radius: 3px; }
+  .cover .kicker { margin-top: 30mm; font-size: 11pt; font-weight: 700; color: var(--red); letter-spacing: 0.12em; text-transform: uppercase; }
+  .cover .title { font-size: 40pt; font-weight: 800; color: var(--blue); line-height: 1.05; margin: 3mm 0 4mm; }
+  .cover .sub { font-size: 15pt; color: var(--ink-2); max-width: 150mm; }
+  .cover .learn { margin-top: 18mm; border-top: 1px solid var(--line); padding-top: 6mm; }
+  .cover .learn ul { columns: 2; column-gap: 8mm; padding-left: 5mm; font-size: 10.5pt; }
+  .cover .foot { margin-top: auto; font-size: 10pt; color: var(--ink-2); border-top: 1px solid var(--line); padding-top: 4mm; display: flex; justify-content: space-between; }
+  .toc { list-style: none; padding: 0; margin: 4mm 0 0; font-size: 10.5pt; }
+  .toc li { display: flex; align-items: baseline; gap: 2mm; margin-bottom: 2.1mm; }
+  .toc .n { color: var(--red); font-weight: 700; width: 7mm; }
+  .toc .dots { flex: 1; border-bottom: 1px dotted #b8c0cf; transform: translateY(-1mm); }
+  .toc .p { font-weight: 600; color: var(--blue); width: 8mm; text-align: right; }
+  .toc .d { font-size: 8.8pt; color: var(--ink-2); }
+</style>
+</head>
+<body>
+
+<!-- ============================ COUVERTURE ============================ -->
+<section class="cover">
+  <div class="stripe"></div>
+  <div class="kicker">Préparation aux entretiens</div>
+  <div class="title">NBA Predictor</div>
+  <div class="sub">Comprendre son projet de A à Z, avec des mots simples : les données, le Machine Learning, l'API, le site et sa mise en ligne.</div>
+
+  <div class="learn">
+    <p><b>Dans ce document</b></p>
+    <ul>
+      <li>Ce que fait le projet, en une page</li>
+      <li>Les outils : Python, venv, pip, Git, npm</li>
+      <li>Les données et pandas</li>
+      <li>Le Machine Learning expliqué simplement</li>
+      <li>Elo, régression logistique, XGBoost</li>
+      <li>Évaluer un modèle sans tricher</li>
+      <li>L'API FastAPI et le site Next.js</li>
+      <li>Le serveur et la mise à jour quotidienne</li>
+      <li>Les fichiers clés et des extraits de code</li>
+      <li>29 questions d'entretien et un glossaire</li>
+    </ul>
+  </div>
+
+  <div class="box retenir" style="margin-top:8mm">
+    <div class="box-title">Comment lire ce document</div>
+    <p>Chaque partie explique une notion simplement, puis la relie au projet. Les encadrés bleus « À retenir » donnent l'essentiel à savoir dire. Les encadrés rouges « En entretien » proposent une phrase toute prête. Un mot technique te bloque ? Il est défini dans le glossaire, à la fin.</p>
+  </div>
+
+  <div class="foot">
+    <span>Rémi Coimbra · BUT MMI, parcours Développement</span>
+    <span>nba.remicoimbra.fr · octobre 2026</span>
+  </div>
+</section>
+
+<!-- ============================ SOMMAIRE ============================ -->
+<section class="chap newpage">
+  <h1>Sommaire</h1>
+  <ol class="toc">
+    <li><span class="n">1</span><span>Le projet en une page</span><span class="dots"></span><span class="p">{{p1}}</span></li>
+    <li><span class="n">2</span><span>Vue d'ensemble : le trajet d'une donnée</span><span class="dots"></span><span class="p">{{p2}}</span></li>
+    <li><span class="n">3</span><span>Les outils de base <span class="d">Python, venv, pip, Git, npm, CSV, JSON</span></span><span class="dots"></span><span class="p">{{p3}}</span></li>
+    <li><span class="n">4</span><span>Les données <span class="d">nba_api, pandas, nettoyage</span></span><span class="dots"></span><span class="p">{{p4}}</span></li>
+    <li><span class="n">5</span><span>Le Machine Learning, simplement</span><span class="dots"></span><span class="p">{{p5}}</span></li>
+    <li><span class="n">6</span><span>Les variables du projet <span class="d">Elo, forme, repos, effectif</span></span><span class="dots"></span><span class="p">{{p6}}</span></li>
+    <li><span class="n">7</span><span>Les modèles <span class="d">régression logistique, XGBoost</span></span><span class="dots"></span><span class="p">{{p7}}</span></li>
+    <li><span class="n">8</span><span>Évaluer honnêtement <span class="d">log loss, walk-forward, bootstrap</span></span><span class="dots"></span><span class="p">{{p8}}</span></li>
+    <li><span class="n">9</span><span>Expliquer une prédiction</span><span class="dots"></span><span class="p">{{p9}}</span></li>
+    <li><span class="n">10</span><span>Le score et les statistiques des joueurs</span><span class="dots"></span><span class="p">{{p10}}</span></li>
+    <li><span class="n">11</span><span>L'API <span class="d">FastAPI, REST, HTTP, CORS</span></span><span class="dots"></span><span class="p">{{p11}}</span></li>
+    <li><span class="n">12</span><span>Le site <span class="d">Next.js, React, Tailwind, accessibilité</span></span><span class="dots"></span><span class="p">{{p12}}</span></li>
+    <li><span class="n">13</span><span>La mise en ligne <span class="d">VPS, Caddy, systemd, synchro</span></span><span class="dots"></span><span class="p">{{p13}}</span></li>
+    <li><span class="n">14</span><span>Les fichiers clés</span><span class="dots"></span><span class="p">{{p14}}</span></li>
+    <li><span class="n">15</span><span>Extraits de code commentés</span><span class="dots"></span><span class="p">{{p15}}</span></li>
+    <li><span class="n">16</span><span>Questions d'entretien</span><span class="dots"></span><span class="p">{{p16}}</span></li>
+    <li><span class="n">17</span><span>Glossaire</span><span class="dots"></span><span class="p">{{p17}}</span></li>
+  </ol>
+
+  <div class="box oral" style="margin-top:10mm">
+    <div class="box-title">Le projet en 30 secondes</div>
+    <p>« NBA Predictor est une application web qui prédit les matchs de NBA. Je récupère dix saisons de données, je calcule des variables comme un classement Elo, et j'entraîne un modèle de Machine Learning avec scikit-learn. Une API en Python (FastAPI) sert les prédictions, et un site en Next.js les affiche avec des graphiques qui expliquent chaque prédiction. Le site est en ligne sur mon serveur et se met à jour chaque jour. Le modèle trouve le vainqueur dans 66 % des cas, contre 55 % pour la règle “l'équipe à domicile gagne toujours”. »</p>
+  </div>
+</section>
+
+<!-- ============================ 1. LE PROJET ============================ -->
+<section class="chap newpage" id="c1">
+  <h1><span class="num">1</span>Le projet en une page</h1>
+  <p class="lead">NBA Predictor est une application web qui prédit l'issue des matchs de NBA, et qui explique chaque prédiction.</p>
+
+  <p>Pour chaque match, le site affiche :</p>
+  <ul>
+    <li>la <b>probabilité de victoire</b> de chaque équipe (par exemple 63 % pour Boston) ;</li>
+    <li>un <b>score estimé</b>, avec une fourchette (par exemple 114 – 110) ;</li>
+    <li>les <b>statistiques attendues de chaque joueur</b> : minutes, points, rebonds, passes, interceptions, contres ;</li>
+    <li><b>pourquoi</b> le modèle pense cela : quelles statistiques ont pesé, et dans quel sens.</li>
+  </ul>
+  <p>Le site est en ligne sur <b>nba.remicoimbra.fr</b>. Il se met à jour chaque jour avec les nouveaux matchs.</p>
+
+  <div class="tiles">
+    <div class="tile"><div class="v">10 saisons</div><div class="l">de 2016-17 à 2025-26</div></div>
+    <div class="tile"><div class="v">11 969</div><div class="l">matchs dans l'historique</div></div>
+    <div class="tile"><div class="v">66 %</div><div class="l">de vainqueurs bien prédits (55 % pour « le domicile gagne »)</div></div>
+    <div class="tile"><div class="v">12</div><div class="l">variables utilisées par le modèle</div></div>
+    <div class="tile"><div class="v">9,2 pts</div><div class="l">d'erreur moyenne sur le score d'une équipe</div></div>
+    <div class="tile"><div class="v">3 pages</div><div class="l">matchs du jour, fiche match, « Le modèle »</div></div>
+  </div>
+
+  <figure class="shotfig narrow">
+    <div class="shot" style="aspect-ratio:1280/860"><img src="../screenshots/accueil-clair.png" style="object-position:50% 0%" alt=""></div>
+    <p class="caption">La page d'accueil : les matchs du 23 octobre 2026, avec la probabilité de victoire et le score estimé de chaque match.</p>
+  </figure>
+
+  <h2>Pourquoi ce projet ?</h2>
+  <p>Pour montrer un projet <b>complet, de bout en bout</b> : récupérer des données réelles, entraîner un modèle de Machine Learning, le rendre disponible par une API, l'afficher dans une interface soignée et accessible, puis le mettre en ligne sur un vrai serveur.</p>
+
+  <div class="box retenir">
+    <div class="box-title">À retenir</div>
+    <p>Une phrase : <b>une application web qui prédit les matchs NBA avec du Machine Learning, et qui explique chaque prédiction</b>. Trois couches : les données et le modèle (Python), l'API (Python, FastAPI), le site (JavaScript, Next.js).</p>
+  </div>
+</section>
+
+<!-- ============================ 2. VUE D'ENSEMBLE ============================ -->
+<section class="chap" id="c2">
+  <h1><span class="num">2</span>Vue d'ensemble : le trajet d'une donnée</h1>
+  <p class="lead">Une donnée part du site de la NBA et finit sous forme de graphique dans ton navigateur. Voici son trajet.</p>
+
+  <figure>
+    <svg viewBox="0 0 700 205" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, sans-serif">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#4b5363"/></marker>
+      </defs>
+      <g font-size="12.5" text-anchor="middle">
+        <rect x="2" y="30" width="110" height="66" rx="7" fill="#f3f4f6" stroke="#9ca3af"/>
+        <text x="57" y="58" font-weight="700" fill="#1f2430">stats.nba.com</text>
+        <text x="57" y="77" font-size="11" fill="#4b5363">site officiel</text>
+
+        <rect x="147" y="30" width="110" height="66" rx="7" fill="#eef3fb" stroke="#17408B"/>
+        <text x="202" y="58" font-weight="700" fill="#17408B">data/</text>
+        <text x="202" y="77" font-size="11" fill="#4b5363">Python, pandas</text>
+
+        <rect x="294" y="30" width="110" height="66" rx="7" fill="#fff8e8" stroke="#b7791f"/>
+        <text x="349" y="58" font-weight="700" fill="#8a5a12">Fichiers</text>
+        <text x="349" y="77" font-size="11" fill="#4b5363">CSV, JSON, .pkl</text>
+
+        <rect x="441" y="30" width="110" height="66" rx="7" fill="#eef3fb" stroke="#17408B"/>
+        <text x="496" y="58" font-weight="700" fill="#17408B">api/</text>
+        <text x="496" y="77" font-size="11" fill="#4b5363">Python, FastAPI</text>
+
+        <rect x="588" y="30" width="110" height="66" rx="7" fill="#fdf0f2" stroke="#C9082A"/>
+        <text x="643" y="58" font-weight="700" fill="#C9082A">front/</text>
+        <text x="643" y="77" font-size="11" fill="#4b5363">Next.js, React</text>
+      </g>
+      <g stroke="#4b5363" stroke-width="1.6" marker-end="url(#ar)">
+        <line x1="113" y1="63" x2="145" y2="63"/>
+        <line x1="258" y1="63" x2="292" y2="63"/>
+        <line x1="405" y1="63" x2="439" y2="63"/>
+        <line x1="552" y1="63" x2="586" y2="63"/>
+      </g>
+      <g font-size="10.5" fill="#4b5363" text-anchor="middle">
+        <text x="129" y="22">nba_api</text>
+        <text x="275" y="22">écrit</text>
+        <text x="422" y="22">lit</text>
+        <text x="569" y="22">JSON</text>
+      </g>
+      <g font-size="10.5" fill="#1f2430" text-anchor="middle">
+        <text x="57" y="122">matchs, scores,</text>
+        <text x="57" y="137">joueurs, calendrier</text>
+        <text x="202" y="122">collecte, nettoyage,</text>
+        <text x="202" y="137">variables,</text>
+        <text x="202" y="152">entraînement</text>
+        <text x="349" y="122">games_clean.csv</text>
+        <text x="349" y="137">team_state.json</text>
+        <text x="349" y="152">logreg.pkl (le modèle)</text>
+        <text x="496" y="122">calcule la prédiction</text>
+        <text x="496" y="137">à la demande</text>
+        <text x="643" y="122">cartes, graphiques,</text>
+        <text x="643" y="137">explications</text>
+      </g>
+      <line x1="2" y1="175" x2="698" y2="175" stroke="#d7dde8"/>
+      <g font-size="10.5" text-anchor="middle">
+        <text x="202" y="195" fill="#17408B" font-weight="600">sur le PC : une fois par jour</text>
+        <text x="569" y="195" fill="#C9082A" font-weight="600">sur le serveur : à chaque visite</text>
+      </g>
+    </svg>
+  </figure>
+
+  <h2>Les quatre dossiers</h2>
+  <table class="t">
+    <tr><th>Dossier</th><th>Langage</th><th>Rôle</th><th>Image</th></tr>
+    <tr><td><b>data/</b></td><td>Python</td><td>Récupère les matchs, calcule les variables, entraîne le modèle.</td><td>la cuisine</td></tr>
+    <tr><td><b>api/</b></td><td>Python</td><td>Reçoit une question (« qui va gagner ce soir ? ») et répond en JSON.</td><td>le serveur du restaurant</td></tr>
+    <tr><td><b>front/</b></td><td>JavaScript</td><td>Affiche les réponses : pages, graphiques, calendrier.</td><td>la salle et l'assiette</td></tr>
+    <tr><td><b>infra/</b></td><td>PowerShell, Bash</td><td>Met à jour les données et met en ligne les nouvelles versions.</td><td>la livraison</td></tr>
+  </table>
+
+  <h2>Trois moments différents</h2>
+  <ul>
+    <li><b>L'entraînement</b> (de temps en temps, quand on améliore le modèle) : quelques minutes de calcul sur tout l'historique. Il produit le modèle, un fichier <code>logreg.pkl</code>.</li>
+    <li><b>La synchronisation</b> (chaque jour) : on récupère les nouveaux matchs, on recalcule l'état de chaque équipe (<code>team_state.json</code>) et le calendrier (<code>schedule.json</code>). On ne réentraîne pas le modèle.</li>
+    <li><b>La prédiction</b> (à chaque visite) : l'API lit ces fichiers et calcule la prédiction en quelques millisecondes.</li>
+  </ul>
+
+  <h2>Et la base de données ?</h2>
+  <p>Il n'y en a pas pour l'instant. Des fichiers CSV et JSON en tiennent lieu. C'est un choix assumé : 12 000 matchs, c'est petit, et une base de données ajouterait un logiciel de plus à installer et à surveiller. Une base PostgreSQL est prévue si le projet grandit.</p>
+
+  <div class="box retenir">
+    <div class="box-title">À retenir</div>
+    <p>Données (Python) → fichiers → API (Python) → site (JavaScript). Le modèle est entraîné une fois, les données sont mises à jour chaque jour, la prédiction est calculée à chaque visite.</p>
+  </div>
+</section>
+
+<!-- ============================ 3. OUTILS ============================ -->
+<section class="chap" id="c3">
+  <h1><span class="num">3</span>Les outils de base</h1>
+
+  <p class="def"><b>Python</b> : un langage de programmation simple à lire, très utilisé pour les données et l'IA, grâce à ses nombreuses bibliothèques. Tout <code>data/</code> et <code>api/</code> est en Python (version 3.14).</p>
+  <p class="def"><b>Bibliothèque</b> (ou <i>package</i>) : du code écrit par d'autres, qu'on installe et qu'on réutilise. Exemple : pandas pour les tableaux.</p>
+  <p class="def"><b>pip</b> : l'outil qui installe les bibliothèques Python (<code>pip install pandas</code>).</p>
+  <p class="def"><b>requirements.txt</b> : la liste des bibliothèques et de leurs versions exactes. <code>pip install -r requirements.txt</code> réinstalle tout à l'identique sur une autre machine, par exemple le serveur.</p>
+
+  <h2>Le venv (environnement virtuel)</h2>
+  <p>Un venv est un dossier qui contient <b>un Python et ses bibliothèques, rien que pour un projet</b>.</p>
+  <p><b>Pourquoi ?</b> Deux projets peuvent demander deux versions différentes de la même bibliothèque. Sans venv, tout est installé au même endroit et les projets se marchent dessus. Avec un venv, chaque projet a sa boîte à outils.</p>
+  <p>Dans le projet, le venv est <code>api/venv</code>. On l'active avant de travailler : « (venv) » apparaît alors dans le terminal.</p>
+<pre><span class="c"># Une seule fois : créer l'environnement et installer les bibliothèques</span>
+cd api
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+<span class="c"># Ensuite, à chaque fois : activer puis lancer l'API</span>
+.\venv\Scripts\Activate.ps1
+uvicorn app.main:app --reload</pre>
+
+  <div class="box piege">
+    <div class="box-title">Piège rencontré</div>
+    <p>Lancer <code>uvicorn</code> depuis le mauvais dossier donne l'erreur <code>No module named 'app'</code>. Il faut être dans <code>api/</code>, venv activé. Autre point important : <code>data/</code> et <code>api/</code> utilisent les <b>mêmes versions</b> de scikit-learn, car le modèle est sauvegardé par l'un et rechargé par l'autre. Une version différente peut empêcher de le recharger.</p>
+  </div>
+
+  <h2>Le côté JavaScript</h2>
+  <p class="def"><b>JavaScript</b> : le langage des navigateurs web. Le site est écrit en JavaScript (pas en TypeScript).</p>
+  <p class="def"><b>Node.js</b> : permet d'exécuter du JavaScript hors du navigateur. On s'en sert pour lancer le site en développement et le construire.</p>
+  <p class="def"><b>npm</b> : l'équivalent de pip pour JavaScript. Le fichier <code>package.json</code> joue le rôle de <code>requirements.txt</code>. <code>npm run dev</code> lance le site en local.</p>
+
+  <h2>Git et GitHub</h2>
+  <p><b>Git</b> garde l'historique de chaque modification du code. Un <b>commit</b> est une version enregistrée, avec un message qui dit ce qui a changé. On peut revenir en arrière à tout moment. <b>GitHub</b> héberge ce dépôt en ligne ; le dépôt du projet est public, c'est une vitrine.</p>
+  <p>Les données et les modèles ne sont pas sur GitHub : ils sont lourds et on peut les régénérer. Le fichier <code>.gitignore</code> liste ce que Git doit ignorer.</p>
+
+  <h2>Les formats de fichiers</h2>
+  <p class="def"><b>CSV</b> : un tableau en texte. Une ligne par enregistrement, colonnes séparées par des virgules. Comme un fichier Excel très simple. Les matchs sont stockés ainsi.</p>
+  <p class="def"><b>JSON</b> : du texte structuré en paires « clé : valeur », lisible par tous les langages. C'est le format qu'échangent l'API et le site.</p>
+<pre>{
+  "home_team": { "name": "Boston Celtics", "tricode": "BOS" },
+  "prediction": {
+    "home_win_probability": 0.633,
+    "predicted_home_score": 114,
+    "predicted_away_score": 110
+  }
+}</pre>
+  <p class="def"><b>.pkl</b> : un objet Python sauvegardé dans un fichier. Le modèle entraîné est stocké ainsi (<code>logreg.pkl</code>), puis rechargé par l'API.</p>
+
+  <div class="box retenir">
+    <div class="box-title">À retenir</div>
+    <p>venv = une boîte à outils isolée par projet. requirements.txt / package.json = la liste des outils. Git = l'historique du code. CSV = tableaux, JSON = échanges entre l'API et le site.</p>
+  </div>
+</section>
+
+<!-- ============================ 4. DONNÉES ============================ -->
+<section class="chap" id="c4">
+  <h1><span class="num">4</span>Les données</h1>
+
+  <h2>D'où viennent-elles ?</h2>
+  <p>De <b>stats.nba.com</b>, le site officiel de statistiques de la NBA. La bibliothèque Python <b>nba_api</b> interroge ce site à notre place. Elle propose des « endpoints » (des points d'accès) :</p>
+  <ul>
+    <li><code>LeagueGameFinder</code> : tous les matchs d'une saison, avec les statistiques de chaque équipe ;</li>
+    <li><code>LeagueGameLog</code> : la feuille de match de chaque joueur (255 000 lignes sur 10 saisons) ;</li>
+    <li><code>ScoreboardV3</code> : les matchs prévus un jour donné (le calendrier).</li>
+  </ul>
+
+  <h2>La collecte</h2>
+  <p>La NBA donne <b>une ligne par équipe et par match</b>, donc deux lignes par match. <code>fetch_games.py</code> les recombine en <b>une ligne par match</b> : équipe à domicile, équipe à l'extérieur, scores, et le <b>boxscore</b> (tirs tentés, rebonds, balles perdues…). Le script garde un cache : s'il a déjà les données, il ne les télécharge pas une seconde fois.</p>
+
+  <h2>pandas, l'outil des tableaux</h2>
+  <p><b>pandas</b> est la bibliothèque Python pour manipuler des tableaux. Un tableau s'appelle un <b>DataFrame</b> : des lignes et des colonnes nommées, comme une feuille Excel. pandas s'appuie sur <b>numpy</b>, qui fait les calculs sur les nombres très vite.</p>
+  <table class="t">
+    <tr><th>Opération</th><th>Ce qu'elle fait</th></tr>
+    <tr><td><code>pd.read_csv("games.csv")</code></td><td>Lit un fichier CSV et le transforme en DataFrame.</td></tr>
+    <tr><td><code>df[df["season"] == "2025-26"]</code></td><td>Garde seulement les lignes d'une saison (un filtre).</td></tr>
+    <tr><td><code>df.groupby("team_id")</code></td><td>Fait un calcul équipe par équipe.</td></tr>
+    <tr><td><code>s.shift(1)</code></td><td>Décale d'une ligne : chaque match reçoit la valeur du match précédent.</td></tr>
+    <tr><td><code>s.rolling(10).mean()</code></td><td>Moyenne glissante sur les 10 dernières lignes.</td></tr>
+    <tr><td><code>df.to_csv("out.csv")</code></td><td>Enregistre le DataFrame dans un fichier CSV.</td></tr>
+  </table>
+
+  <h2>Le nettoyage</h2>
+  <p><code>clean_data.py</code> prépare les données :</p>
+  <ul>
+    <li>convertir les dates en vraies dates et les scores en nombres ;</li>
+    <li>écarter les lignes incomplètes ;</li>
+    <li>créer la <b>cible</b> <code>home_win</code> : 1 si l'équipe à domicile gagne, 0 sinon ;</li>
+    <li><b>trier les matchs par date</b>. C'est indispensable : ensuite, tout se calcule dans l'ordre du temps.</li>
+  </ul>
+
+  <h2>Les fichiers produits</h2>
+  <table class="t files">
+    <tr><th>Fichier</th><th>Contenu</th></tr>
+    <tr><td>raw/games_history.csv</td><td>Les matchs bruts, une ligne par match.</td></tr>
+    <tr><td>raw/player_games_raw.csv</td><td>Une ligne par joueur et par match.</td></tr>
+    <tr><td>processed/games_clean.csv</td><td>Les matchs nettoyés et triés.</td></tr>
+    <tr><td>processed/game_features.csv</td><td>Les matchs avec toutes les variables calculées (partie 6).</td></tr>
+    <tr><td>processed/team_state.json</td><td>L'état actuel de chaque équipe : Elo, derniers matchs, joueurs. Lu par l'API.</td></tr>
+    <tr><td>processed/schedule.json</td><td>Le calendrier, de 3 jours avant à 14 jours après aujourd'hui.</td></tr>
+  </table>
+
+  <div class="box retenir">
+    <div class="box-title">À retenir</div>
+    <p>nba_api récupère les données. pandas les manipule sous forme de DataFrame. Le nettoyage crée la cible <code>home_win</code> et trie les matchs par date.</p>
+  </div>
+</section>
+
+<!-- ============================ 5. ML ============================ -->
+<section class="chap" id="c5">
+  <h1><span class="num">5</span>Le Machine Learning, simplement</h1>
+  <p class="lead">Au lieu d'écrire des règles à la main, on montre à un algorithme des milliers de matchs passés et leur résultat. Il trouve lui-même le lien entre les statistiques et le résultat.</p>
+
+  <h2>Le vocabulaire de base</h2>
+  <ul>
+    <li><b>Exemple</b> : une ligne du tableau. Ici, un match passé.</li>
+    <li><b>Feature</b> (variable) : une information <b>connue avant le match</b>. Par exemple l'écart d'Elo ou les jours de repos.</li>
+    <li><b>Cible</b> (target) : ce qu'on veut prédire. Ici <code>home_win</code>, 1 ou 0.</li>
+    <li><b>Modèle</b> : la « formule » apprise à partir des exemples.</li>
+    <li><b>Entraînement</b> (<code>fit</code>) : l'étape où le modèle apprend.</li>
+    <li><b>Prédiction</b> (<code>predict</code>) : appliquer le modèle à un nouveau match.</li>
+  </ul>
+  <p>Par convention, on appelle <b>X</b> le tableau des features et <b>y</b> la colonne de la cible :</p>
+  <table class="t">
+    <tr><th>Match</th><th class="r">diff_elo</th><th class="r">diff_rest_days</th><th class="r">diff_win_pct_last10</th><th class="r">home_win (y)</th></tr>
+    <tr><td>BOS – NYK</td><td class="r">+45</td><td class="r">0</td><td class="r">+0,20</td><td class="r">1</td></tr>
+    <tr><td>MIA – DET</td><td class="r">−30</td><td class="r">−1</td><td class="r">−0,10</td><td class="r">0</td></tr>
+    <tr><td>…</td><td class="r">…</td><td class="r">…</td><td class="r">…</td><td class="r">…</td></tr>
+  </table>
+  <p class="small">Valeurs inventées pour l'exemple. Les colonnes de gauche forment X, la dernière forme y.</p>
+
+  <h2>Les types de problèmes</h2>
+  <p>On parle d'<b>apprentissage supervisé</b> : pour chaque exemple, on connaît la bonne réponse. Deux familles :</p>
+  <ul>
+    <li><b>Classification</b> : la réponse est une catégorie. « Le domicile gagne ou perd ? » C'est le cœur du projet.</li>
+    <li><b>Régression</b> : la réponse est un nombre. « Combien de minutes va jouer ce joueur ? » Utilisé pour les statistiques des joueurs.</li>
+  </ul>
+  <p>Le modèle ne répond pas oui ou non : il donne une <b>probabilité</b> (« 63 % de chances pour Boston »). C'est plus utile et plus honnête : un 51 % et un 90 % ne disent pas du tout la même chose.</p>
+
+  <h2>Entraînement et test</h2>
+  <p>On ne note pas un élève sur les exercices qu'il a déjà corrigés. Pour un modèle, c'est pareil : on l'évalue sur des matchs qu'il <b>n'a jamais vus</b> pendant l'entraînement. Sinon, la note est trop belle.</p>
+
+  <h2>Le surapprentissage (overfitting)</h2>
+  <p>Le modèle apprend les exemples par cœur, y compris leur part de hasard. Il est excellent sur les matchs d'entraînement et mauvais sur les nouveaux. Pour l'éviter dans le projet : un modèle simple, peu de variables (12), et l'« arrêt précoce » pour XGBoost (partie 7).</p>
+
+  <h2>La fuite de données (data leakage)</h2>
+  <p>C'est le piège numéro un. Il s'agit d'utiliser, sans le vouloir, une information <b>qu'on n'aurait pas eue au moment de prédire</b>. Exemple : le nombre de tirs tentés pendant le match. Le modèle semble génial en test, et il est inutile en vrai. Quatre protections dans le projet :</p>
+  <ol>
+    <li><code>shift(1)</code> : chaque moyenne n'utilise que les matchs d'avant (extrait A, partie 15).</li>
+    <li>Une <b>liste blanche</b> de colonnes (<code>FEATURE_PATTERNS</code>) : une colonne n'est utilisée que si son nom correspond à un motif autorisé. Une nouvelle colonne ne devient jamais une feature par accident.</li>
+    <li>Une évaluation <b>dans l'ordre du temps</b> (walk-forward, partie 8).</li>
+    <li>Un script de contrôle, <code>check_features.py</code> : il inverse le résultat de quelques matchs et vérifie que les variables de ces matchs ne bougent pas. Seules celles des matchs suivants doivent changer.</li>
+  </ol>
+
+  <h2>Les bibliothèques de Machine Learning</h2>
+  <ul>
+    <li><b>scikit-learn</b> : la bibliothèque de référence du Machine Learning « classique » en Python. Elle fournit les modèles (<code>LogisticRegression</code>), la préparation des données (<code>StandardScaler</code>, <code>SimpleImputer</code>), les <code>Pipeline</code> et les métriques (<code>log_loss</code>). Tous ses modèles s'utilisent pareil : <code>fit(X, y)</code> pour apprendre, <code>predict_proba(X)</code> pour prédire.</li>
+    <li><b>XGBoost</b> : une bibliothèque spécialisée dans les arbres de décision « boostés » (partie 7).</li>
+    <li><b>joblib</b> : sauvegarde le modèle entraîné dans un fichier <code>.pkl</code>.</li>
+    <li><b>scipy</b> : des fonctions mathématiques, comme la loi normale utilisée pour le score.</li>
+  </ul>
+
+  <div class="box retenir">
+    <div class="box-title">À retenir</div>
+    <p>Features (X) + cible (y) → entraînement → modèle → probabilité. On teste toujours sur des matchs jamais vus. Le danger principal est la fuite de données : n'utiliser que ce qui est connu <b>avant</b> le match.</p>
+  </div>
+</section>
+
+<!-- ============================ 6. VARIABLES ============================ -->
+<section class="chap" id="c6">
+  <h1><span class="num">6</span>Les variables du projet</h1>
+  <p class="lead">Le <b>feature engineering</b> consiste à transformer les données brutes en variables utiles au modèle. C'est souvent là que se joue la qualité d'un modèle, plus que dans le choix de l'algorithme.</p>
+
+  <h2>L'Elo, la variable star</h2>
+  <p>L'Elo vient des échecs. Chaque équipe a une note, au départ 1500. Après chaque match, <b>le gagnant prend des points au perdant</b>. Battre une équipe forte rapporte plus que battre une équipe faible. Gagner largement rapporte un peu plus (multiplicateur d'écart, une idée du site FiveThirtyEight).</p>
+  <p>La probabilité que l'équipe à domicile gagne :</p>
+  <div class="formula">P(domicile) = 1 / (1 + 10<sup>−(Elo<sub>dom</sub> + 40 − Elo<sub>ext</sub>) / 400</sup>)</div>
+  <p>Le « + 40 » est l'avantage du terrain. Après le match, chaque note bouge de :</p>
+  <div class="formula">variation = K × multiplicateur d'écart × (résultat − probabilité attendue), avec K = 20</div>
+  <p><b>Exemple.</b> Boston (1600) reçoit New York (1550). Écart : 1600 + 40 − 1550 = 90 points, soit 63 % de chances pour Boston. Si Boston gagne de 10 points, il prend environ 7 points à New York. S'il perd de 10 points, il en perd environ 13. Une surprise fait bouger les notes davantage.</p>
+  <p><b>Entre deux saisons</b>, chaque note revient à mi-chemin vers 1500, car les effectifs changent pendant l'été.</p>
+  <p><b>Réglages.</b> K, l'avantage du terrain et le retour vers 1500 ont été choisis parmi 396 combinaisons testées (<code>tune_elo.py</code>). Avant, l'avantage du terrain valait 100 points : l'Elo donnait 62 % de chances au domicile en moyenne, alors qu'il gagne 55 % de ses matchs. Avec 40, il tombe juste.</p>
+  <p><b>Pourquoi c'est la meilleure variable</b> (59 % du poids du modèle) : contrairement au pourcentage de victoires, l'Elo tient compte de la force des adversaires.</p>
+
+  <h2>Les autres variables</h2>
+  <table class="t">
+    <tr><th>Variable</th><th>Ce qu'elle mesure</th></tr>
+    <tr><td>Bilan de la saison (<code>win_pct</code>)</td><td>Le pourcentage de victoires depuis le début de la saison.</td></tr>
+    <tr><td>Bilan domicile / extérieur</td><td>Le pourcentage de victoires à domicile pour l'équipe qui reçoit, à l'extérieur pour l'autre.</td></tr>
+    <tr><td>Forme récente</td><td>Victoires sur les 10 derniers matchs, et Net Rating récent.</td></tr>
+    <tr><td>Net Rating</td><td>Points marqués moins points encaissés, pour 100 possessions. Une <b>possession</b> est une action d'attaque.</td></tr>
+    <tr><td>Attaque récente</td><td>Points marqués en moyenne sur les 5 et 10 derniers matchs.</td></tr>
+    <tr><td>Jours de repos</td><td>Jours depuis le dernier match, plafonnés à 7. Repère la fatigue des matchs à la suite (back-to-back).</td></tr>
+    <tr><td>Effectif (<code>lineup_delta</code>)</td><td>La force des joueurs du dernier match, comparée à la force habituelle. Repère les absents.</td></tr>
+  </table>
+
+  <h3>Des écarts plutôt que des valeurs séparées</h3>
+  <p>Le modèle reçoit surtout des <b>écarts domicile − extérieur</b>. Par exemple <code>diff_elo</code> = Elo du domicile − Elo de l'extérieur. C'est plus simple pour lui : il n'a pas à apprendre la soustraction. Le modèle final utilise <b>12 variables</b> : 10 écarts et l'Elo de chaque équipe.</p>
+
+  <h3>L'effectif, en détail</h3>
+  <ul>
+    <li>La valeur d'un joueur est son <b>Game Score</b> moyen sur ses 15 derniers matchs. Le Game Score (formule de John Hollinger) résume le match d'un joueur en un seul nombre : points, tirs, rebonds, passes, etc.</li>
+    <li>La force d'un effectif est la somme des 8 meilleures valeurs parmi les joueurs du match.</li>
+    <li><code>lineup_delta</code> = force au dernier match − force moyenne des 10 derniers matchs. Très négatif quand des titulaires manquaient.</li>
+    <li>Hypothèse : un joueur absent du dernier match l'est encore. Pourquoi pas le rapport officiel des blessures ? Il n'est fiable qu'une demi-heure avant le match, et la mise à jour tourne à 10 h.</li>
+  </ul>
+
+  <h3>Une idée qui n'a pas marché</h3>
+  <p>La fatigue des déplacements (distance parcourue, décalage horaire, matchs des 4 derniers jours) a été testée. Aucun gain confirmé : elle n'a pas été gardée. Savoir dire « j'ai essayé, ça n'a pas marché, donc je ne l'ai pas gardé » est un vrai point fort en entretien.</p>
+
+  <div class="box retenir">
+    <div class="box-title">À retenir</div>
+    <p>L'Elo est une note qui monte quand on gagne, surtout contre une équipe forte. C'est la variable la plus importante. Le modèle utilise 12 variables, surtout des écarts entre les deux équipes. Les absents sont repérés grâce au dernier match joué.</p>
+  </div>
+</section>
+
+<!-- ============================ 7. MODÈLES ============================ -->
+<section class="chap" id="c7">
+  <h1><span class="num">7</span>Les modèles</h1>
+  <p class="lead">Quatre façons de prédire ont été comparées, de la plus simple à la plus complexe.</p>
+
+  <table class="t">
+    <tr><th>Modèle</th><th>Principe</th><th class="r">Précision</th><th class="r">Log loss</th></tr>
+    <tr><td>Règle naïve</td><td>« L'équipe à domicile gagne toujours. » La base à battre (baseline).</td><td class="r">55,3 %</td><td class="r">0,688</td></tr>
+    <tr><td>Elo seul</td><td>La formule de l'Elo, sans apprentissage.</td><td class="r">65,9 %</td><td class="r">0,618</td></tr>
+    <tr><td>XGBoost</td><td>Des centaines de petits arbres de décision.</td><td class="r">65,7 %</td><td class="r">0,618</td></tr>
+    <tr class="hl"><td>Régression logistique</td><td>Une somme pondérée des 12 variables. <b>Le modèle en ligne.</b></td><td class="r">66,1 %</td><td class="r">0,614</td></tr>
+  </table>
+  <p class="small">Mesuré sur 6 140 matchs jamais vus (saisons 2021-22 à 2025-26). Pour la log loss, plus bas = mieux (partie 8).</p>
+
+  <h2>La régression logistique</h2>
+  <p>Malgré son nom, c'est un modèle de <b>classification</b>. Elle fonctionne en deux temps :</p>
+  <ol>
+    <li>Elle calcule un score <b>z</b>, une somme pondérée des variables : z = b + w<sub>1</sub>×x<sub>1</sub> + w<sub>2</sub>×x<sub>2</sub> + … Les poids <b>w</b> (les <b>coefficients</b>) et le biais <b>b</b> sont appris pendant l'entraînement.</li>
+    <li>Elle transforme z en probabilité entre 0 et 1, grâce à la <b>sigmoïde</b> : p = 1 / (1 + e<sup>−z</sup>).</li>
+  </ol>
+  <div class="cols" style="align-items:center">
+    <figure>
+      <svg viewBox="0 0 420 215" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, sans-serif">
+        <g stroke="#e4e8f0"><line x1="50" y1="20" x2="400" y2="20"/><line x1="50" y1="100" x2="400" y2="100" stroke-dasharray="4 3" stroke="#b8c0cf"/><line x1="225" y1="20" x2="225" y2="180" stroke-dasharray="4 3" stroke="#b8c0cf"/></g>
+        <line x1="50" y1="180" x2="400" y2="180" stroke="#4b5363"/>
+        <line x1="50" y1="20" x2="50" y2="180" stroke="#4b5363"/>
+        <polyline fill="none" stroke="#17408B" stroke-width="3" stroke-linejoin="round" points="50,177.1 71.9,175.4 93.75,172.5 115.6,167.8 137.5,161.0 159.4,150.9 181.25,137.0 203.1,119.5 225,100 246.9,80.5 268.75,63.0 290.6,49.1 312.5,39.0 334.4,32.2 356.25,27.5 378.1,24.6 400,22.9"/>
+        <circle cx="268.75" cy="63" r="4.5" fill="#C9082A"/>
+        <text x="276" y="72" font-size="12" fill="#C9082A" font-weight="600">z = 1 → 73 %</text>
+        <circle cx="225" cy="100" r="4.5" fill="#C9082A"/>
+        <text x="232" y="114" font-size="12" fill="#C9082A" font-weight="600">z = 0 → 50 %</text>
+        <g font-size="11" fill="#4b5363" text-anchor="end"><text x="44" y="24">100 %</text><text x="44" y="104">50 %</text><text x="44" y="184">0 %</text></g>
+        <g font-size="11" fill="#4b5363" text-anchor="middle"><text x="50" y="196">−4</text><text x="137.5" y="196">−2</text><text x="225" y="196">0</text><text x="312.5" y="196">+2</text><text x="400" y="196">+4</text></g>
+        <text x="225" y="212" font-size="11.5" fill="#1f2430" text-anchor="middle">score z (log-odds)</text>
+      </svg>
+      <figcaption>La sigmoïde écrase n'importe quel score en une probabilité entre 0 et 100 %.</figcaption>
+    </figure>
+    <div>
+      <p>z s'appelle le <b>log-odds</b> (le logarithme de la cote). z = 0 donne 50 %, z positif favorise le domicile, z négatif l'extérieur.</p>
+      <p><b>Ses qualités</b> : simple, rapide, difficile à surentraîner, et <b>explicable</b> : chaque coefficient dit dans quel sens et avec quelle force une variable pousse.</p>
+    </div>
+  </div>
+
+  <h2>Le Pipeline scikit-learn</h2>
+  <p>Un <b>Pipeline</b> enchaîne des étapes, appliquées dans le même ordre à l'entraînement et à la prédiction. Celui du projet en a trois :</p>
+  <ol>
+    <li><b>SimpleImputer</b> (médiane) : remplace une valeur manquante par la médiane de l'entraînement. Utile en début de saison, quand le bilan n'existe pas encore.</li>
+    <li><b>StandardScaler</b> : met chaque variable sur la même échelle (moyenne 0, écart-type 1). L'Elo vaut environ 1500, un pourcentage environ 0,5 : sans mise à l'échelle, les coefficients ne seraient pas comparables et l'apprentissage serait faussé.</li>
+    <li><b>LogisticRegression</b> : le modèle lui-même.</li>
+  </ol>
+  <p>Avantage : tout tient en un seul objet, sauvegardé dans un seul fichier. Impossible d'oublier une étape au moment de prédire.</p>
+
+  <h2>XGBoost</h2>
+  <p>Un <b>arbre de décision</b> est une suite de questions oui / non (« l'écart d'Elo dépasse-t-il 50 ? », puis « moins de 2 jours de repos ? »…) qui mène à une prédiction. Le <b>boosting</b> construit des centaines de petits arbres l'un après l'autre : chaque nouvel arbre corrige les erreurs des précédents, et la prédiction est la somme de tous.</p>
+  <p>XGBoost repère des relations complexes, mais il peut surapprendre. D'où l'<b>arrêt précoce</b> (early stopping) : on arrête d'ajouter des arbres quand l'erreur ne baisse plus sur des matchs mis de côté. Le modèle final garde moins de 200 petits arbres, au lieu de 300 au départ.</p>
+
+  <h2>Pourquoi la régression logistique est en ligne</h2>
+  <ul>
+    <li>Elle donne les <b>meilleures probabilités</b> : sa log loss est la plus basse, avec un écart net face à XGBoost et à l'Elo seul, dans le même sens sur les 5 saisons testées.</li>
+    <li>Ses prédictions s'<b>expliquent exactement</b> (partie 9).</li>
+    <li>Ici, les relations sont presque en ligne droite (plus d'Elo = plus de chances). XGBoost n'a rien de complexe à exploiter : ses arbres ajoutent surtout du bruit.</li>
+  </ul>
+  <p>XGBoost reste utilisé ailleurs : il prédit les <b>minutes des joueurs</b>, où il gagne nettement (partie 10).</p>
+
+  <div class="box oral">
+    <div class="box-title">En entretien</div>
+    <p>« J'ai comparé une régression logistique et XGBoost. Le modèle le plus complexe n'était pas le meilleur : la régression logistique donne de meilleures probabilités, et je peux expliquer chacune de ses prédictions. Le choix s'est fait sur une mesure, pas sur une intuition. »</p>
+  </div>
+</section>
+
+<!-- ============================ 8. ÉVALUER ============================ -->
+<section class="chap" id="c8">
+  <h1><span class="num">8</span>Évaluer honnêtement</h1>
+  <p class="lead">Un modèle ne vaut que par la façon dont on le mesure. Cette partie est sans doute la plus importante pour un entretien en data.</p>
+
+  <h2>Les mesures</h2>
+  <p><b>Précision</b> (accuracy) : le pourcentage de matchs où le favori du modèle a gagné. Simple à comprendre, mais elle ignore la confiance : un 51 % et un 90 % comptent pareil.</p>
+  <p><b>Log loss</b> : elle punit les probabilités trop sûres d'elles qui se trompent. Plus elle est basse, mieux c'est.</p>
+  <div class="formula">log loss = − moyenne de [ y × ln(p) + (1 − y) × ln(1 − p) ]</div>
+  <table class="t">
+    <tr><th>Le modèle dit</th><th>Résultat</th><th class="r">Pénalité</th></tr>
+    <tr><td>90 % domicile</td><td>le domicile gagne</td><td class="r">0,11 (faible)</td></tr>
+    <tr><td>90 % domicile</td><td>le domicile perd</td><td class="r">2,30 (très forte)</td></tr>
+    <tr><td>55 % domicile</td><td>le domicile perd</td><td class="r">0,80 (modérée)</td></tr>
+  </table>
+  <p>Repère : dire toujours 50 / 50 donne 0,693. Le modèle fait <b>0,614</b>.</p>
+  <p><b>Score de Brier</b> : la moyenne de (probabilité − résultat)². Même idée, plus douce. Repère : 0,25 pour un 50 / 50 permanent. Le modèle fait <b>0,213</b>.</p>
+  <p><b>Calibration</b> : quand le modèle annonce 70 %, l'équipe gagne-t-elle vraiment 7 fois sur 10 ? L'erreur de calibration du modèle est d'environ 1 point.</p>
+  <p>Le site affiche des probabilités : elles doivent être justes, pas seulement désigner le bon favori. C'est pourquoi <b>la log loss est le critère principal</b>.</p>
+
+  <figure class="shotfig narrow">
+    <div class="shot" style="aspect-ratio:1280/805"><img src="../screenshots/modele-clair.png" style="object-position:50% 18.4%" alt=""></div>
+    <p class="caption">La page « Le modèle » du site : les mesures, et la courbe de calibration (les points suivent la diagonale : les probabilités sont fiables).</p>
+  </figure>
+
+  <h2>La validation walk-forward</h2>
+  <p>Les matchs ont un ordre dans le temps. Un découpage au hasard mélangerait passé et futur : le modèle apprendrait sur des matchs postérieurs à ceux qu'il prédit. Le <b>walk-forward</b> respecte le temps : pour prédire une saison, on entraîne uniquement sur les saisons d'avant.</p>
+  <figure>
+    <svg viewBox="0 0 700 215" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, sans-serif">
+      <g font-size="10.5" fill="#4b5363" text-anchor="middle">
+        <text x="142" y="14">16-17</text><text x="198" y="14">17-18</text><text x="254" y="14">18-19</text><text x="310" y="14">19-20</text><text x="366" y="14">20-21</text>
+        <text x="422" y="14">21-22</text><text x="478" y="14">22-23</text><text x="534" y="14">23-24</text><text x="590" y="14">24-25</text><text x="646" y="14">25-26</text>
+      </g>
+      <g font-size="11" fill="#1f2430">
+        <text x="0" y="39">Prédire 2021-22</text><text x="0" y="71">Prédire 2022-23</text><text x="0" y="103">Prédire 2023-24</text><text x="0" y="135">Prédire 2024-25</text><text x="0" y="167">Prédire 2025-26</text>
+      </g>
+      <g fill="#2b5bb8">
+        <rect x="116" y="22" width="52" height="24" rx="3"/><rect x="172" y="22" width="52" height="24" rx="3"/><rect x="228" y="22" width="52" height="24" rx="3"/><rect x="284" y="22" width="52" height="24" rx="3"/><rect x="340" y="22" width="52" height="24" rx="3"/>
+        <rect x="116" y="54" width="52" height="24" rx="3"/><rect x="172" y="54" width="52" height="24" rx="3"/><rect x="228" y="54" width="52" height="24" rx="3"/><rect x="284" y="54" width="52" height="24" rx="3"/><rect x="340" y="54" width="52" height="24" rx="3"/><rect x="396" y="54" width="52" height="24" rx="3"/>
+        <rect x="116" y="86" width="52" height="24" rx="3"/><rect x="172" y="86" width="52" height="24" rx="3"/><rect x="228" y="86" width="52" height="24" rx="3"/><rect x="284" y="86" width="52" height="24" rx="3"/><rect x="340" y="86" width="52" height="24" rx="3"/><rect x="396" y="86" width="52" height="24" rx="3"/><rect x="452" y="86" width="52" height="24" rx="3"/>
+        <rect x="116" y="118" width="52" height="24" rx="3"/><rect x="172" y="118" width="52" height="24" rx="3"/><rect x="228" y="118" width="52" height="24" rx="3"/><rect x="284" y="118" width="52" height="24" rx="3"/><rect x="340" y="118" width="52" height="24" rx="3"/><rect x="396" y="118" width="52" height="24" rx="3"/><rect x="452" y="118" width="52" height="24" rx="3"/><rect x="508" y="118" width="52" height="24" rx="3"/>
+        <rect x="116" y="150" width="52" height="24" rx="3"/><rect x="172" y="150" width="52" height="24" rx="3"/><rect x="228" y="150" width="52" height="24" rx="3"/><rect x="284" y="150" width="52" height="24" rx="3"/><rect x="340" y="150" width="52" height="24" rx="3"/><rect x="396" y="150" width="52" height="24" rx="3"/><rect x="452" y="150" width="52" height="24" rx="3"/><rect x="508" y="150" width="52" height="24" rx="3"/><rect x="564" y="150" width="52" height="24" rx="3"/>
+      </g>
+      <g fill="#C9082A">
+        <rect x="396" y="22" width="52" height="24" rx="3"/><rect x="452" y="54" width="52" height="24" rx="3"/><rect x="508" y="86" width="52" height="24" rx="3"/><rect x="564" y="118" width="52" height="24" rx="3"/><rect x="620" y="150" width="52" height="24" rx="3"/>
+      </g>
+      <g fill="#eceff4">
+        <rect x="452" y="22" width="52" height="24" rx="3"/><rect x="508" y="22" width="52" height="24" rx="3"/><rect x="564" y="22" width="52" height="24" rx="3"/><rect x="620" y="22" width="52" height="24" rx="3"/>
+        <rect x="508" y="54" width="52" height="24" rx="3"/><rect x="564" y="54" width="52" height="24" rx="3"/><rect x="620" y="54" width="52" height="24" rx="3"/>
+        <rect x="564" y="86" width="52" height="24" rx="3"/><rect x="620" y="86" width="52" height="24" rx="3"/>
+        <rect x="620" y="118" width="52" height="24" rx="3"/>
+      </g>
+      <g font-size="11" fill="#1f2430">
+        <rect x="116" y="192" width="14" height="12" rx="2" fill="#2b5bb8"/><text x="136" y="202">entraînement</text>
+        <rect x="236" y="192" width="14" height="12" rx="2" fill="#C9082A"/><text x="256" y="202">test (saison jamais vue)</text>
+        <rect x="406" y="192" width="14" height="12" rx="2" fill="#eceff4" stroke="#d7dde8"/><text x="426" y="202">futur, pas encore utilisé</text>
+      </g>
+    </svg>
+    <figcaption>Cinq « plis » : chaque saison de test est prédite par un modèle entraîné uniquement sur le passé. 6 140 matchs prédits au total.</figcaption>
+  </figure>
+  <p>C'est exactement la situation réelle : prédire la saison qui vient avec tout le passé connu. <b>Leçon apprise</b> : au début, le modèle était testé sur la seule saison 2025-26, avec 69 % de précision. Sur 5 saisons, la moyenne est de 66 %, de 64 % à 68 % selon la saison. Une seule saison donnait une vision trop optimiste.</p>
+  <p><b>Poids par saison</b> : les saisons anciennes comptent moins (leur poids est divisé par deux toutes les deux saisons). Le jeu a changé : le domicile gagnait 58-59 % de ses matchs en 2016-19, contre 54-55 % aujourd'hui.</p>
+
+  <h2>Un progrès est-il réel ?</h2>
+  <p>D'une version à l'autre, l'écart est souvent minuscule (0,002 de log loss). Progrès réel ou simple hasard ? Trois outils :</p>
+  <ul>
+    <li><b>Comparaison appariée</b> : on compare les deux versions sur les mêmes matchs, match par match.</li>
+    <li><b>Bootstrap</b> : on retire 2 000 fois au hasard des journées de matchs (avec remise) et on recalcule l'écart à chaque tirage. On obtient un <b>intervalle de confiance à 95 %</b> : la plage où se trouve très probablement le vrai écart.</li>
+    <li><b>Règle de décision</b> : on garde un changement seulement si tout l'intervalle est sous zéro (amélioration certaine) et si le Brier ne se dégrade pas. Les réglages se font sur 2021-22 à 2023-24 ; 2024-25 et 2025-26 servent seulement à confirmer.</li>
+  </ul>
+  <table class="t">
+    <tr><th>Essai</th><th>Écart de log loss (intervalle à 95 %)</th><th>Décision</th></tr>
+    <tr><td>Indicateur d'effectif</td><td>−0,0023 [−0,0040 ; −0,0006] : tout sous zéro</td><td><b>Adopté</b></td></tr>
+    <tr><td>Fatigue des déplacements</td><td>−0,0005 [−0,0015 ; +0,0005] : l'intervalle contient zéro</td><td>Écarté</td></tr>
+  </table>
+
+  <div class="box retenir">
+    <div class="box-title">À retenir</div>
+    <p>Log loss = qualité des probabilités, c'est le critère principal. Walk-forward = on prédit toujours le futur avec le passé. Un gain dont l'intervalle de confiance contient zéro n'est pas un gain : <b>on ne le garde pas</b>.</p>
+  </div>
+</section>
+
+<!-- ============================ 9. EXPLIQUER ============================ -->
+<section class="chap" id="c9">
+  <h1><span class="num">9</span>Expliquer une prédiction</h1>
+  <p class="lead">Avec une régression logistique, chaque prédiction se décompose exactement en contributions des variables.</p>
+
+  <div class="formula">z = biais + contribution(Elo) + contribution(forme) + … &nbsp;&nbsp;puis&nbsp;&nbsp; p = sigmoïde(z)</div>
+  <ul>
+    <li><b>Contribution</b> d'une variable = son coefficient × sa valeur standardisée.</li>
+    <li><b>Valeur standardisée</b> = l'écart à la moyenne, compté en écarts-types. 0 veut dire « comme un match moyen » : la contribution est alors nulle.</li>
+    <li>Les 12 variables sont regroupées en <b>7 familles</b> lisibles : Elo, forme récente, effectif, repos, attaque, bilan domicile / extérieur, bilan de la saison.</li>
+  </ul>
+
+  <figure class="shotfig">
+    <div class="shot" style="aspect-ratio:1280/525"><img src="../screenshots/match-clair.png" style="object-position:50% 35%" alt=""></div>
+    <p class="caption">Fiche du match Cleveland – Atlanta : l'Elo (+5,1 points) et l'effectif (+3,2) poussent vers Cleveland, la forme récente (+4,4) vers Atlanta. Résultat : 60 % pour Cleveland.</p>
+  </figure>
+
+  <h2>Le poids de chaque famille</h2>
+  <p class="keep">En moyenne, sur tous les matchs d'entraînement :</p>
+  <div class="bars">
+    <div class="bar"><span>Rating Elo</span><div class="track"><div class="fill" style="width:100%"></div></div><span class="pct">58,9 %</span></div>
+    <div class="bar"><span>Forme récente</span><div class="track"><div class="fill" style="width:21.7%"></div></div><span class="pct">12,8 %</span></div>
+    <div class="bar"><span>Effectif</span><div class="track"><div class="fill" style="width:18.5%"></div></div><span class="pct">10,9 %</span></div>
+    <div class="bar"><span>Jours de repos</span><div class="track"><div class="fill" style="width:13.4%"></div></div><span class="pct">7,9 %</span></div>
+    <div class="bar"><span>Attaque récente</span><div class="track"><div class="fill" style="width:7.3%"></div></div><span class="pct">4,3 %</span></div>
+    <div class="bar"><span>Bilan domicile / extérieur</span><div class="track"><div class="fill" style="width:6.8%"></div></div><span class="pct">4,0 %</span></div>
+    <div class="bar"><span>Bilan de la saison</span><div class="track"><div class="fill" style="width:2.2%"></div></div><span class="pct">1,3 %</span></div>
+  </div>
+
+  <h2>Pourquoi c'est important</h2>
+  <p>On fait davantage confiance à une prédiction qu'on comprend. C'est ce qu'on appelle l'<b>IA explicable</b>. Avec XGBoost, il aurait fallu une approximation (des méthodes comme SHAP). Avec la régression logistique, l'explication est exacte : le biais plus la somme des contributions redonne exactement la probabilité affichée. Le script <code>check_features.py</code> le vérifie.</p>
+
+  <div class="box oral">
+    <div class="box-title">En entretien</div>
+    <p>« Chaque prédiction est expliquée sur la fiche match. Pour une régression logistique, la contribution d'une variable, c'est son coefficient multiplié par sa valeur standardisée. La somme des contributions redonne exactement la probabilité : ce n'est pas une approximation. »</p>
+  </div>
+</section>
+
+<!-- ============================ 10. SCORE & JOUEURS ============================ -->
+<section class="chap" id="c10">
+  <h1><span class="num">10</span>Le score et les statistiques des joueurs</h1>
+  <p class="lead">Le modèle principal ne prédit que le vainqueur. Le score et les statistiques des joueurs en sont déduits.</p>
+
+  <figure class="shotfig narrow">
+    <div class="shot" style="aspect-ratio:1280/480"><img src="../screenshots/match-clair.png" style="object-position:50% 7.1%" alt=""></div>
+    <p class="caption">Le haut d'une fiche match : la probabilité (60 %) et le score estimé (120 – 117).</p>
+  </figure>
+
+  <h2>Le total des points</h2>
+  <div class="formula">total = possessions attendues × points par possession attendus</div>
+  <p>Chaque équipe a deux notes, mises à jour après chaque match comme l'Elo : son <b>rythme</b> (combien de possessions dans ses matchs) et ses <b>points</b> (combien de points par possession dans ses matchs). Ces notes tiennent compte des adversaires rencontrés.</p>
+
+  <h2>L'écart entre les deux équipes</h2>
+  <div class="formula">écart = σ × Φ<sup>−1</sup>(p), avec σ ≈ 12,7 points</div>
+  <p>L'idée : l'écart final d'un match suit à peu près une <b>courbe en cloche</b> (loi normale), d'écart-type σ. Si le modèle donne 50 %, l'écart attendu est nul. Plus la probabilité s'éloigne de 50 %, plus l'écart grandit. Φ<sup>−1</sup> est la fonction inverse de la loi normale : elle transforme une probabilité en nombre d'écarts-types.</p>
+  <p><b>Exemple</b> : 63 % pour Boston → Φ<sup>−1</sup>(0,63) ≈ 0,34 → écart ≈ 0,34 × 12,7 ≈ 4 points. Score affiché : 114 – 110.</p>
+  <p><b>Avantage</b> : le score ne contredit jamais le favori. L'ancienne méthode, qui estimait chaque équipe séparément, désignait un autre vainqueur dans 22 % des matchs.</p>
+
+  <h2>La fourchette à 80 %</h2>
+  <p>Chaque score est accompagné d'une fourchette d'environ ±15 points. Sur les saisons testées, elle contient le vrai score dans <b>81 % des cas</b>, pour 80 % visés. C'est honnête : un score de basket est difficile à prévoir (environ 15 points d'erreur sur le total des deux équipes).</p>
+
+  <h2>Les statistiques des joueurs</h2>
+  <ul>
+    <li><b>Joueurs attendus</b> : ceux du dernier match de l'équipe.</li>
+    <li><b>Minutes</b> : prédites par XGBoost (un problème de <b>régression</b>), à partir de 28 entrées : minutes récentes, repos, nombre de joueurs disponibles, rythme attendu du match…</li>
+    <li><b>Autres statistiques</b> = minutes × rendement par minute du joueur, ajusté au rythme du match et à ce que concède l'adversaire.</li>
+    <li>Le rendement d'un joueur qui a peu joué est <b>rapproché de la moyenne de la ligue</b>. Sans ça, un remplaçant qui marque 6 points en 4 minutes serait projeté à 50 points sur un match entier.</li>
+  </ul>
+  <table class="t">
+    <tr><th>Erreur moyenne par joueur</th><th class="r">Minutes</th><th class="r">Points</th><th class="r">Rebonds</th><th class="r">Passes</th></tr>
+    <tr><td>Moyenne de la saison du joueur</td><td class="r">5,31</td><td class="r">4,80</td><td class="r">1,97</td><td class="r">1,38</td></tr>
+    <tr class="hl"><td>Minutes apprises × rendement (en ligne)</td><td class="r">4,77</td><td class="r">4,68</td><td class="r">1,91</td><td class="r">1,35</td></tr>
+  </table>
+  <p><b>Limite</b> : 14 % des joueurs attendus ne jouent finalement pas (blessure, repos).</p>
+
+  <div class="box retenir">
+    <div class="box-title">À retenir</div>
+    <p>Total = rythme × efficacité. Écart = déduit de la probabilité, donc le favori est toujours devant. Fourchette à 80 % vérifiée sur les données. Joueurs : minutes par XGBoost, puis minutes × rendement par minute.</p>
+  </div>
+</section>
+
+<!-- ============================ 11. API ============================ -->
+<section class="chap" id="c11">
+  <h1><span class="num">11</span>L'API</h1>
+  <p class="lead">Une <b>API</b> (Application Programming Interface) est une porte d'entrée par laquelle un programme demande quelque chose à un autre. Ici, le site demande « les matchs du 23 octobre, avec leurs prédictions », et l'API répond en JSON.</p>
+
+  <h2>REST et HTTP</h2>
+  <p><b>HTTP</b> est le langage du web : un client envoie une <b>requête</b>, le serveur renvoie une <b>réponse</b> avec un code. <b>REST</b> est une convention : chaque ressource a une adresse (URL), et on utilise des verbes HTTP (GET pour lire, POST pour créer…). Toutes les routes du projet sont des GET : l'API est en lecture seule.</p>
+  <table class="t">
+    <tr><th>Route</th><th>Ce qu'elle renvoie</th></tr>
+    <tr><td><code>GET /games/today?date=2026-10-23</code></td><td>Les matchs d'un jour, avec leurs prédictions.</td></tr>
+    <tr><td><code>GET /games/calendar</code></td><td>Les jours disponibles et leur nombre de matchs.</td></tr>
+    <tr><td><code>GET /games/{game_id}</code></td><td>La fiche complète d'un match : explication, joueurs, courbe d'Elo.</td></tr>
+    <tr><td><code>GET /model/metrics</code></td><td>Les résultats du dernier entraînement.</td></tr>
+  </table>
+
+  <h2>FastAPI et uvicorn</h2>
+  <p><b>FastAPI</b> est un framework Python pour écrire des API. Une fonction Python précédée d'un décorateur (<code>@router.get("/today")</code>) devient une route. FastAPI vérifie les paramètres, convertit les dictionnaires Python en JSON et génère une documentation interactive (<code>/docs</code>).</p>
+  <p><b>uvicorn</b> est le serveur qui fait tourner l'application et écoute les requêtes. L'option <code>--reload</code> le relance à chaque modification du code (en développement).</p>
+  <p><b>Pourquoi FastAPI ?</b> Le modèle est en Python : l'API peut le charger directement, sans conversion. Et FastAPI est simple, rapide et bien documenté.</p>
+
+  <h2>L'organisation du code</h2>
+  <ul>
+    <li><code>main.py</code> : crée l'application, ajoute CORS, branche les routeurs.</li>
+    <li><code>routers/</code> : les routes. Elles reçoivent la requête, gèrent les erreurs, renvoient la réponse.</li>
+    <li><code>services/</code> : la logique métier. <code>predictor_service.py</code> charge le modèle et prédit, <code>schedule_service.py</code> lit le calendrier.</li>
+  </ul>
+  <p>C'est la <b>séparation des responsabilités</b> : chaque fichier a un rôle clair, et une route reste courte et lisible.</p>
+
+  <h2>Le calcul d'une prédiction, étape par étape</h2>
+  <ol>
+    <li>Le site appelle <code>/games/today?date=2026-10-23</code>.</li>
+    <li><code>schedule_service</code> lit <code>schedule.json</code> : la liste des matchs du jour.</li>
+    <li>Pour chaque match, <code>predictor_service</code> lit l'état des deux équipes dans <code>team_state.json</code> : Elo, derniers matchs, joueurs.</li>
+    <li>Il calcule les 12 variables avec <code>features_lib.py</code>, <b>les mêmes formules qu'à l'entraînement</b>.</li>
+    <li>Le modèle (<code>logreg.pkl</code>, chargé une seule fois) donne la probabilité.</li>
+    <li>On ajoute le score, la fourchette et l'explication, et on renvoie le JSON. Environ 0,07 seconde pour 12 matchs.</li>
+  </ol>
+
+  <div class="box piege">
+    <div class="box-title">Le point délicat : features_lib.py</div>
+    <p>L'entraînement calcule les variables sur tout l'historique, l'API pour un seul match à venir. Si les deux calculaient l'Elo d'une façon légèrement différente, le modèle se tromperait <b>sans aucun message d'erreur</b>. Solution : un seul fichier de formules, <code>features_lib.py</code>, utilisé des deux côtés. Et <code>check_features.py</code> vérifie sur 50 matchs que les deux donnent les mêmes valeurs, au milliardième près.</p>
+  </div>
+
+  <h2>Les codes de réponse</h2>
+  <table class="t">
+    <tr><th>Code</th><th>Signification dans le projet</th></tr>
+    <tr><td>200</td><td>Tout va bien.</td></tr>
+    <tr><td>400</td><td>La date est mal écrite (attendu AAAA-MM-JJ).</td></tr>
+    <tr><td>404</td><td>Cette date n'est pas encore synchronisée, ou le match n'existe pas.</td></tr>
+    <tr><td>502</td><td>Le site de la NBA ne répond pas (la faute vient d'ailleurs).</td></tr>
+    <tr><td>503</td><td>Le modèle n'est pas prêt (fichier manquant). On peut réessayer plus tard.</td></tr>
+  </table>
+  <p>Un match contre une équipe inconnue (un club étranger en présaison) renvoie <code>prediction: null</code> sans faire échouer le reste de la liste.</p>
+
+  <h2>CORS</h2>
+  <p>En développement, le site tourne sur <code>localhost:3000</code> et l'API sur <code>localhost:8000</code> : ce sont deux « origines » différentes. Par sécurité, le navigateur bloque un site qui interroge une autre origine, sauf si celle-ci l'autorise. <b>CORS</b> est ce mécanisme d'autorisation : l'API déclare « j'accepte les requêtes de localhost:3000 ». En production, le site et l'API partagent le même domaine (l'API est sous <code>/api</code>) : CORS n'est plus nécessaire.</p>
+</section>
+
+<!-- ============================ 12. FRONT ============================ -->
+<section class="chap" id="c12">
+  <h1><span class="num">12</span>Le site (front-end)</h1>
+
+  <h2>React et les composants</h2>
+  <p><b>React</b> est une bibliothèque JavaScript pour construire une interface avec des <b>composants</b> : des briques réutilisables. <code>GameCard</code> est la carte d'un match, <code>TeamBadge</code> le logo d'une équipe, <code>WinGauge</code> la jauge de probabilité. Un composant est une fonction JavaScript qui renvoie du <b>JSX</b>, une écriture proche du HTML.</p>
+  <ul>
+    <li><b>État</b> (state) : une donnée qui, quand elle change, met l'affichage à jour.</li>
+    <li><b>Hook</b> : une fonction React dont le nom commence par <code>use</code>. <code>useState</code> crée un état, <code>useEffect</code> lance une action (comme un appel à l'API). <code>useApi</code> est un hook écrit pour le projet.</li>
+    <li><b>Props</b> : les paramètres qu'un composant reçoit de son parent.</li>
+  </ul>
+
+  <h2>Next.js</h2>
+  <p><b>Next.js</b> est un framework construit sur React. Son <b>App Router</b> transforme les dossiers en pages :</p>
+  <table class="t files">
+    <tr><th>Fichier</th><th>Page</th></tr>
+    <tr><td>src/app/page.js</td><td><code>/</code> : les matchs du jour (la date est dans l'URL, <code>/?date=2026-10-23</code>)</td></tr>
+    <tr><td>src/app/match/page.js</td><td><code>/match?id=…</code> : la fiche d'un match</td></tr>
+    <tr><td>src/app/modele/page.js</td><td><code>/modele</code> : les résultats du modèle</td></tr>
+    <tr><td>src/app/layout.js</td><td>Le cadre commun à toutes les pages : en-tête, polices, thème</td></tr>
+  </table>
+  <p><code>"use client"</code> en haut d'un fichier indique un composant exécuté dans le navigateur, nécessaire pour l'interactivité (clics, calendrier, chargement des données).</p>
+
+  <h2>Parler à l'API</h2>
+  <p>Tous les appels passent par <code>services/api.js</code> (extrait E, partie 15). Le hook <code>useApi</code> gère trois états, chacun avec son affichage :</p>
+  <ul>
+    <li><b>chargement</b> : des « squelettes » de cartes grises ;</li>
+    <li><b>erreur</b> : un message clair et un bouton « Réessayer » ;</li>
+    <li><b>données</b> : les cartes. Et un cas à part : « aucun match ce jour-là ».</li>
+  </ul>
+
+  <h2>Le style : Tailwind CSS</h2>
+  <p><b>Tailwind</b> permet de styler avec des petites classes directement dans le HTML (<code>text-sm</code>, <code>font-bold</code>, <code>space-y-6</code>) au lieu d'écrire un fichier CSS à part. Les couleurs des deux thèmes (clair et sombre) sont déclarées une seule fois dans <code>globals.css</code>.</p>
+
+  <h2>Graphiques et animations</h2>
+  <p>Les graphiques (jauge, barres des facteurs, courbe d'Elo, calibration) sont <b>faits main en SVG</b>, sans bibliothèque. Ils sont animés avec la bibliothèque <b>motion</b>.</p>
+
+  <h2>L'accessibilité</h2>
+  <ul>
+    <li>Contrastes au niveau <b>WCAG AAA</b>, le plus exigeant (7:1 pour le texte), vérifiés par un script : <code>npm run check:contrast</code>.</li>
+    <li>Calendrier entièrement utilisable au clavier (flèches, Entrée, Échap).</li>
+    <li>Chaque graphique a un tableau de données (« Voir les données ») pour les lecteurs d'écran.</li>
+    <li>Animations réduites si l'utilisateur l'a demandé à son système (<code>prefers-reduced-motion</code>).</li>
+  </ul>
+
+  <h2>L'export statique</h2>
+  <p><code>npm run build</code> produit de simples fichiers HTML, CSS et JavaScript (dossier <code>out/</code>). Le serveur n'a donc aucun programme Node.js à faire tourner : c'est plus simple, plus sûr et sans coût en mémoire. Conséquence : la fiche match est à l'adresse <code>/match?id=…</code> plutôt que <code>/match/…</code>, car un export statique ne peut pas générer à l'avance une page par match.</p>
+  <p><b>ESLint</b> (<code>npm run lint</code>) relit le code JavaScript pour repérer les erreurs et les mauvaises pratiques.</p>
+
+  <div class="box oral">
+    <div class="box-title">En entretien (côté MMI)</div>
+    <p>« J'ai soigné l'expérience utilisateur : chaque prédiction est expliquée par des graphiques, les états de chargement et d'erreur sont prévus, et le site respecte le niveau AAA des contrastes WCAG, avec un script qui le vérifie automatiquement. »</p>
+  </div>
+</section>
+
+<!-- ============================ 13. DÉPLOIEMENT ============================ -->
+<section class="chap" id="c13">
+  <h1><span class="num">13</span>La mise en ligne</h1>
+
+  <figure>
+    <svg viewBox="0 0 700 250" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, sans-serif">
+      <defs>
+        <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#4b5363"/></marker>
+      </defs>
+      <!-- NBA -->
+      <rect x="20" y="12" width="160" height="42" rx="6" fill="#f3f4f6" stroke="#9ca3af"/>
+      <text x="100" y="38" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1f2430">stats.nba.com</text>
+      <!-- PC -->
+      <rect x="20" y="110" width="170" height="125" rx="7" fill="#eef3fb" stroke="#17408B"/>
+      <text x="105" y="133" font-size="12.5" font-weight="700" text-anchor="middle" fill="#17408B">PC (Windows)</text>
+      <text x="32" y="158" font-size="10.5" fill="#1f2430">sync_to_vps.ps1</text>
+      <text x="32" y="172" font-size="10" fill="#4b5363">chaque jour à 10 h : données</text>
+      <text x="32" y="198" font-size="10.5" fill="#1f2430">deploy_to_vps.ps1</text>
+      <text x="32" y="212" font-size="10" fill="#4b5363">nouvelle version : code, site,</text>
+      <text x="32" y="225" font-size="10" fill="#4b5363">modèle</text>
+      <!-- VPS -->
+      <rect x="262" y="12" width="290" height="226" rx="8" fill="#fafbfd" stroke="#4b5363" stroke-dasharray="5 3"/>
+      <text x="274" y="30" font-size="11.5" font-weight="700" fill="#4b5363">VPS OVH (Linux)</text>
+      <rect x="276" y="42" width="124" height="46" rx="6" fill="#fdf0f2" stroke="#C9082A"/>
+      <text x="338" y="61" font-size="11.5" font-weight="700" text-anchor="middle" fill="#C9082A">Site statique</text>
+      <text x="338" y="77" font-size="10" text-anchor="middle" fill="#4b5363">HTML, CSS, JS</text>
+      <rect x="276" y="108" width="124" height="46" rx="6" fill="#eef3fb" stroke="#17408B"/>
+      <text x="338" y="127" font-size="11.5" font-weight="700" text-anchor="middle" fill="#17408B">API FastAPI</text>
+      <text x="338" y="143" font-size="10" text-anchor="middle" fill="#4b5363">service systemd isolé</text>
+      <rect x="276" y="176" width="124" height="50" rx="6" fill="#fff8e8" stroke="#b7791f"/>
+      <text x="338" y="196" font-size="10.5" font-weight="700" text-anchor="middle" fill="#8a5a12">team_state.json</text>
+      <text x="338" y="212" font-size="10.5" font-weight="700" text-anchor="middle" fill="#8a5a12">schedule.json</text>
+      <rect x="446" y="50" width="94" height="104" rx="6" fill="#ffffff" stroke="#1f2430"/>
+      <text x="493" y="96" font-size="12" font-weight="700" text-anchor="middle" fill="#1f2430">Caddy</text>
+      <text x="493" y="112" font-size="10" text-anchor="middle" fill="#4b5363">HTTPS,</text>
+      <text x="493" y="125" font-size="10" text-anchor="middle" fill="#4b5363">aiguillage</text>
+      <!-- Visiteur -->
+      <rect x="592" y="96" width="100" height="52" rx="6" fill="#f3f4f6" stroke="#9ca3af"/>
+      <text x="642" y="118" font-size="11.5" font-weight="700" text-anchor="middle" fill="#1f2430">Visiteur</text>
+      <text x="642" y="134" font-size="10" text-anchor="middle" fill="#4b5363">navigateur</text>
+      <!-- flèches -->
+      <g stroke="#4b5363" stroke-width="1.5" fill="none" marker-end="url(#a2)">
+        <line x1="100" y1="55" x2="100" y2="108"/>
+        <line x1="191" y1="200" x2="274" y2="200"/>
+        <line x1="591" y1="122" x2="542" y2="122"/>
+        <line x1="446" y1="65" x2="402" y2="65"/>
+        <line x1="446" y1="131" x2="402" y2="131"/>
+        <line x1="338" y1="155" x2="338" y2="174"/>
+      </g>
+      <line x1="181" y1="33" x2="258" y2="33" stroke="#C9082A" stroke-width="1.5" stroke-dasharray="5 3"/>
+      <g font-size="10" fill="#4b5363">
+        <text x="106" y="86">nba_api</text>
+        <text x="200" y="193">scp (SSH)</text>
+        <text x="572" y="114" text-anchor="middle">HTTPS</text>
+        <text x="424" y="60" text-anchor="middle">/</text>
+        <text x="424" y="126" text-anchor="middle">/api</text>
+        <text x="344" y="169">lit</text>
+      </g>
+      <text x="219" y="26" font-size="10" font-weight="700" fill="#C9082A" text-anchor="middle">✕ bloqué</text>
+    </svg>
+    <figcaption>Le PC récupère les données et les envoie au serveur. Le serveur sert le site et l'API aux visiteurs.</figcaption>
+  </figure>
+
+  <p class="def"><b>VPS</b> (serveur privé virtuel) : un ordinateur loué chez OVH, sous Linux (Ubuntu), allumé jour et nuit.</p>
+  <p class="def"><b>SSH</b> : une connexion sécurisée au serveur depuis le terminal, avec une clé plutôt qu'un mot de passe. <b>scp</b> copie des fichiers à travers SSH.</p>
+  <p class="def"><b>Caddy</b> : le serveur web placé devant tout le reste (on parle de <b>reverse proxy</b>). Il reçoit toutes les visites en HTTPS, sert les fichiers du site, et transmet les adresses <code>/api/…</code> à l'API. Il obtient seul le certificat HTTPS (le cadenas du navigateur).</p>
+  <p class="def"><b>systemd</b> : le gestionnaire de services de Linux. Il lance l'API au démarrage, la relance si elle plante, et l'<b>enferme</b> : pas d'accès à Internet, fichiers en lecture seule, mémoire limitée. Même avec une faille, l'API ne pourrait presque rien faire.</p>
+
+  <h2>Pourquoi les données partent du PC</h2>
+  <p>stats.nba.com ne répond pas aux serveurs des hébergeurs (blocage côté NBA, testé depuis le VPS). Donc, chaque jour à 10 h, une tâche sur le PC (<code>sync_to_vps.ps1</code>) :</p>
+  <ol>
+    <li>télécharge les nouveaux matchs et feuilles de match ;</li>
+    <li>recalcule <code>team_state.json</code> et <code>schedule.json</code> ;</li>
+    <li>les envoie au serveur. L'API les relit toute seule, sans redémarrer.</li>
+  </ol>
+  <p>L'envoi est <b>atomique</b> : le fichier est d'abord copié sous un nom temporaire, puis renommé d'un coup. L'API ne lit donc jamais un fichier à moitié copié.</p>
+  <p>Si le PC reste éteint plusieurs jours, les prédictions vieillissent, puis le calendrier ne couvre plus la date du jour. Le service se dégrade, il ne tombe pas en panne.</p>
+
+  <h2>Mettre en ligne une nouvelle version</h2>
+  <p><code>deploy_to_vps.ps1</code> construit le site, envoie le code de l'API et le modèle, redémarre l'API et vérifie qu'elle répond. Les versions précédentes sont gardées : on peut revenir en arrière.</p>
+
+  <div class="box retenir">
+    <div class="box-title">À retenir</div>
+    <p>Caddy reçoit les visiteurs en HTTPS et aiguille vers le site (fichiers statiques) ou l'API (service systemd isolé). Les données sont mises à jour depuis le PC, car la NBA bloque les serveurs.</p>
+  </div>
+</section>
+
+<!-- ============================ 14. FICHIERS ============================ -->
+<section class="chap" id="c14">
+  <h1><span class="num">14</span>Les fichiers clés</h1>
+  <p class="keep">Inutile de tout connaître. Voici les fichiers à savoir situer et expliquer en une phrase.</p>
+  <table class="t files long">
+    <tr><th>Fichier</th><th>Rôle</th></tr>
+    <tr class="group"><td colspan="2">data/ : données et modèle</td></tr>
+    <tr><td>collectors/fetch_games.py</td><td>Télécharge les matchs avec nba_api, une ligne par match.</td></tr>
+    <tr><td>collectors/fetch_player_logs.py</td><td>Télécharge les feuilles de match des joueurs.</td></tr>
+    <tr><td>collectors/fetch_schedule.py</td><td>Récupère le calendrier → <code>schedule.json</code>.</td></tr>
+    <tr><td>preprocessing/clean_data.py</td><td>Nettoie, crée la cible <code>home_win</code>, trie par date.</td></tr>
+    <tr><td>preprocessing/feature_engineering.py</td><td>Calcule toutes les variables sur l'historique.</td></tr>
+    <tr><td><b>preprocessing/features_lib.py</b></td><td><b>Le fichier central</b> : toutes les formules (Elo, moyennes, repos, effectif, score, joueurs), partagées entre l'entraînement et l'API.</td></tr>
+    <tr><td>preprocessing/team_state.py</td><td>L'état actuel de chaque équipe → <code>team_state.json</code>.</td></tr>
+    <tr><td>preprocessing/check_features.py</td><td>Contrôles : pas de fuite de données, l'API calcule comme l'entraînement.</td></tr>
+    <tr><td><b>models/train_model.py</b></td><td>Entraîne et compare les modèles, sauvegarde <code>logreg.pkl</code> et <code>model_metrics.json</code>.</td></tr>
+    <tr><td>models/evaluate_model.py</td><td>Walk-forward, mesures, comparaison appariée par bootstrap.</td></tr>
+    <tr><td>models/score_model.py</td><td>Le score estimé et sa fourchette.</td></tr>
+    <tr><td>models/player_model.py</td><td>Le modèle des minutes et les statistiques des joueurs.</td></tr>
+    <tr><td>models/tune_elo.py</td><td>Teste 396 réglages de l'Elo.</td></tr>
+    <tr><td>models/saved_models/</td><td>Le modèle (<code>logreg.pkl</code>), le modèle des minutes, la liste ordonnée des 12 variables (<code>feature_columns.json</code>), les résultats (<code>model_metrics.json</code>).</td></tr>
+    <tr class="group"><td colspan="2">api/ : le back-end</td></tr>
+    <tr><td>app/main.py</td><td>Crée l'application FastAPI, ajoute CORS, branche les routes.</td></tr>
+    <tr><td>app/routers/games.py</td><td>Les routes <code>/games/…</code> et la gestion des erreurs.</td></tr>
+    <tr><td>app/routers/model.py</td><td>La route <code>/model/metrics</code>.</td></tr>
+    <tr><td><b>app/services/predictor_service.py</b></td><td>Charge le modèle, calcule les variables d'un match, prédit et explique.</td></tr>
+    <tr><td>app/services/schedule_service.py</td><td>Lit le calendrier.</td></tr>
+    <tr><td>app/core/config.py</td><td>Les réglages, lus dans des variables d'environnement (dev ou production).</td></tr>
+    <tr class="group"><td colspan="2">front/ : le site</td></tr>
+    <tr><td>src/app/</td><td>Les pages (<code>page.js</code>, <code>match/</code>, <code>modele/</code>) et le cadre commun (<code>layout.js</code>).</td></tr>
+    <tr><td>src/components/</td><td>Les briques d'interface : <code>GameCard</code>, <code>MatchView</code>, <code>ModelView</code>, les graphiques.</td></tr>
+    <tr><td><b>src/services/api.js</b></td><td>Tous les appels à l'API.</td></tr>
+    <tr><td>src/lib/useApi.js</td><td>Le hook de chargement : chargement, erreur, données.</td></tr>
+    <tr><td>src/app/globals.css</td><td>Les couleurs des deux thèmes et la configuration de Tailwind.</td></tr>
+    <tr class="group"><td colspan="2">infra/ et documentation</td></tr>
+    <tr><td>infra/sync_to_vps.ps1</td><td>La mise à jour quotidienne des données vers le serveur.</td></tr>
+    <tr><td>infra/deploy_to_vps.ps1</td><td>La mise en ligne d'une nouvelle version.</td></tr>
+    <tr><td>README.md, docs/</td><td>La présentation du projet, l'architecture, le guide de déploiement.</td></tr>
+  </table>
+</section>
+
+<!-- ============================ 15. CODE ============================ -->
+<section class="chap" id="c15">
+  <h1><span class="num">15</span>Extraits de code commentés</h1>
+  <p>Cinq extraits réels du projet. Les numéros rouges renvoient aux explications sous chaque extrait.</p>
+
+  <h2>A. Une moyenne glissante sans fuite (pandas)</h2>
+  <div class="file">data/preprocessing/feature_engineering.py</div>
+<pre>grouped = long_df.groupby("team_id")                          <span class="n">1</span>
+long_df[f"avg_pts_scored_last{w}"] = (                         <span class="n">2</span>
+    grouped["pts_scored"]
+    .transform(lambda s, w=w: s.shift(1).rolling(w, min_periods=1).mean())   <span class="n">3</span>
+)</pre>
+  <ol class="notes">
+    <li><code>long_df</code> a une ligne par équipe et par match, triée par date. <code>groupby</code> fait le calcul équipe par équipe.</li>
+    <li>Une nouvelle colonne, par exemple <code>avg_pts_scored_last10</code>. Le <code>f"…{w}"</code> insère la valeur de <code>w</code> (5 ou 10) dans le nom.</li>
+    <li><code>shift(1)</code> décale d'un match : la ligne du match N reçoit les points du match N−1. Le match lui-même n'est jamais utilisé, c'est la protection contre la fuite. <code>rolling(w).mean()</code> fait la moyenne des <code>w</code> dernières valeurs ; <code>min_periods=1</code> accepte moins de <code>w</code> matchs en début d'historique ; <code>transform</code> renvoie un résultat aligné sur les lignes d'origine.</li>
+  </ol>
+  <table class="t" style="width:70%">
+    <tr><th>Match</th><th class="r">Points marqués</th><th class="r">Moyenne des 3 précédents</th></tr>
+    <tr><td>1</td><td class="r">110</td><td class="r">vide (aucun match avant)</td></tr>
+    <tr><td>2</td><td class="r">100</td><td class="r">110</td></tr>
+    <tr><td>3</td><td class="r">120</td><td class="r">105</td></tr>
+    <tr><td>4</td><td class="r">90</td><td class="r">110</td></tr>
+  </table>
+
+  <h2>B. L'Elo</h2>
+  <div class="file">data/preprocessing/features_lib.py</div>
+<pre>def elo_expected_home(r_home, r_away, params=DEFAULT_ELO_PARAMS):              <span class="n">1</span>
+    return 1 / (1 + 10 ** (-((r_home + params.home_advantage) - r_away) / 400))
+
+def elo_update(r_home, r_away, home_win, home_score, away_score, params=DEFAULT_ELO_PARAMS):
+    expected_home = elo_expected_home(r_home, r_away, params)                  <span class="n">2</span>
+    actual_home = 1.0 if home_win == 1 else 0.0
+    margin = abs(home_score - away_score)
+    <span class="c"># ... (écart d'Elo du vainqueur, pour le multiplicateur)</span>
+    mov_multiplier = elo_mov_multiplier(margin, elo_diff_for_winner)          <span class="n">3</span>
+    delta = params.k * mov_multiplier * (actual_home - expected_home)         <span class="n">4</span>
+    return r_home + delta, r_away - delta                                     <span class="n">5</span></pre>
+  <ol class="notes">
+    <li>La formule de la partie 6, avec l'avantage du terrain (40). <code>**</code> veut dire « puissance » en Python.</li>
+    <li>La probabilité que le domicile gagne, calculée <b>avant</b> le match.</li>
+    <li>Le multiplicateur grandit avec l'écart de points : une large victoire compte un peu plus.</li>
+    <li><code>actual_home − expected_home</code> : la surprise. Favori qui gagne → petite variation. Favori qui perd → grosse variation.</li>
+    <li>Ce que l'un gagne, l'autre le perd. C'est une <b>fonction pure</b> : aucun effet de bord, même entrée = même sortie. Elle est donc facile à tester et à réutiliser côté entraînement comme côté API.</li>
+  </ol>
+
+  <h2>C. Le Pipeline scikit-learn</h2>
+  <div class="file">data/models/train_model.py</div>
+<pre>def make_logreg() -> Pipeline:
+    return Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),     <span class="n">1</span>
+        ("scaler", StandardScaler()),                       <span class="n">2</span>
+        ("clf", LogisticRegression(max_iter=1000)),         <span class="n">3</span>
+    ])
+
+<span class="c"># Utilisation (simplifiée)</span>
+model = make_logreg()
+model.fit(X_train, y_train)                                <span class="n">4</span>
+p_home = model.predict_proba(X_match)[:, 1]                <span class="n">5</span>
+joblib.dump(model, "saved_models/logreg.pkl")              <span class="n">6</span></pre>
+  <ol class="notes">
+    <li>Une valeur manquante est remplacée par la médiane de l'entraînement.</li>
+    <li>Chaque variable est ramenée à une moyenne de 0 et un écart-type de 1.</li>
+    <li>Le modèle. <code>max_iter</code> : nombre maximal d'étapes de l'algorithme qui cherche les meilleurs coefficients.</li>
+    <li>L'entraînement : les trois étapes apprennent sur les mêmes données (médianes, moyennes, coefficients). Dans le vrai code, on passe aussi les poids par saison.</li>
+    <li><code>predict_proba</code> renvoie deux colonnes : P(défaite du domicile) et P(victoire). <code>[:, 1]</code> garde la seconde.</li>
+    <li>Le Pipeline entier est sauvegardé dans un seul fichier, que l'API recharge.</li>
+  </ol>
+
+  <h2>D. Une route FastAPI</h2>
+  <div class="file">api/app/routers/games.py</div>
+<pre>router = APIRouter(prefix="/games", tags=["games"])                          <span class="n">1</span>
+
+@router.get("/today")                                                         <span class="n">2</span>
+def get_today_games(on_date: str | None = Query(default=None, alias="date")):  <span class="n">3</span>
+    target_date = _parse_date(on_date) or date.today()                        <span class="n">4</span>
+    service = _require_predictor()
+    games = _call_schedule(get_todays_games, target_date)
+    return {                                                                  <span class="n">5</span>
+        "date": target_date.isoformat(),
+        "count": len(games),
+        "games": [_serialize_game(service, g, target_date) for g in games],
+    }
+
+def _parse_date(on_date):
+    ...
+    except ValueError:
+        raise HTTPException(status_code=400,                                   <span class="n">6</span>
+                            detail=f"Date invalide : '{on_date}' (attendu YYYY-MM-DD)")</pre>
+  <ol class="notes">
+    <li>Un routeur regroupe les routes qui commencent par <code>/games</code>.</li>
+    <li>Le <b>décorateur</b> transforme la fonction en route : <code>GET /games/today</code>.</li>
+    <li>Le paramètre <code>?date=</code> de l'URL. Il s'appelle <code>on_date</code> dans le code, car <code>date</code> est déjà un nom de type Python. <code>str | None</code> : texte ou rien (facultatif).</li>
+    <li>Sans date, on prend aujourd'hui. <code>_require_predictor</code> et <code>_call_schedule</code> transforment les problèmes en erreurs 503, 404 ou 502.</li>
+    <li>On renvoie un dictionnaire Python : FastAPI le convertit tout seul en JSON. <code>[… for g in games]</code> est une <b>compréhension de liste</b> : on prépare chaque match.</li>
+    <li>Une date mal écrite donne une erreur 400 avec un message clair, plutôt qu'un plantage.</li>
+  </ol>
+
+  <h2>E. Appeler l'API depuis le site</h2>
+  <div class="file">front/src/services/api.js et front/src/components/HomeView.js</div>
+<pre>const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";   <span class="n">1</span>
+
+async function request(path) {                                                     <span class="n">2</span>
+  let res;
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`);                                   <span class="n">3</span>
+  } catch {
+    throw new ApiError(0, "API injoignable. Vérifier qu'elle est bien démarrée.");
+  }
+  if (!res.ok) {                                                                   <span class="n">4</span>
+    <span class="c">// ... lit le message d'erreur renvoyé par l'API</span>
+    throw new ApiError(res.status, detail);
+  }
+  return res.json();
+}
+
+export function getGames(date) {
+  return request(date ? `/games/today?date=${date}` : "/games/today");
+}
+
+<span class="c">// Dans le composant de la page d'accueil :</span>
+const games = useApi(date, () => getGames(date));                                  <span class="n">5</span>
+{games.loading &amp;&amp; !games.previous &amp;&amp; &lt;CardSkeletons /&gt;}
+{games.error &amp;&amp; &lt;ErrorState error={games.error} onRetry={games.retry} /&gt;}</pre>
+  <ol class="notes">
+    <li>L'adresse de l'API vient d'une variable d'environnement fixée à la construction du site : <code>/api</code> en production, l'API locale en développement. <code>??</code> donne la valeur par défaut si la variable est absente.</li>
+    <li><code>async</code> / <code>await</code> : on attend la réponse sans bloquer la page.</li>
+    <li><code>fetch</code> est la fonction du navigateur qui envoie une requête HTTP. Les guillemets inversés <code>`…${…}`</code> insèrent des variables dans le texte.</li>
+    <li><code>res.ok</code> est vrai pour les codes 200 à 299. Sinon, on lance une erreur qui garde le code : le site peut afficher « date non synchronisée » pour un 404.</li>
+    <li>Le hook <code>useApi</code> recharge quand la date change et donne trois états. <code>&amp;&amp;</code> affiche un composant seulement si la condition est vraie : des squelettes pendant le chargement, un message et un bouton « Réessayer » en cas d'erreur.</li>
+  </ol>
+</section>
+
+<!-- ============================ 16. QUESTIONS ============================ -->
+<section class="chap newpage" id="c16">
+  <h1><span class="num">16</span>Questions d'entretien</h1>
+  <p>Des questions probables, avec une réponse courte à adapter avec tes mots. Ne les récite pas : comprends-les.</p>
+
+  <div class="box oral">
+    <div class="box-title">Conseils pour l'oral</div>
+    <ul>
+      <li>Commence simple, puis entre dans le détail si on te le demande.</li>
+      <li>Donne un chiffre : 66 % contre 55 %, 12 variables, 10 saisons.</li>
+      <li>Parle d'un échec : ça montre de la rigueur.</li>
+      <li>Montre le site en direct si tu peux (nba.remicoimbra.fr).</li>
+      <li>Tu ne sais pas ? Dis-le, puis explique comment tu chercherais.</li>
+    </ul>
+  </div>
+
+  <div class="qa-group">Le projet</div>
+  <div class="qa"><div class="q">Présente ton projet.</div>
+    <p class="a">Voir l'encadré « Le projet en 30 secondes » au début. Termine par un chiffre (66 % contre 55 %) et propose de montrer le site en direct.</p></div>
+  <div class="qa"><div class="q">Pourquoi ce sujet ?</div>
+    <p class="a">À adapter avec tes vraies raisons. Arguments solides : le sport offre beaucoup de données publiques, et le résultat se vérifie chaque soir. C'était un bon terrain pour un projet complet : données, Machine Learning, back-end, front-end et mise en ligne.</p></div>
+  <div class="qa"><div class="q">66 %, c'est un bon résultat ?</div>
+    <p class="a">Oui, pour du sport : il y a beaucoup de hasard, et même les cotes des bookmakers tournent autour de 70 % de favoris gagnants. Surtout, c'est mesuré honnêtement : sur 5 saisons que le modèle n'avait jamais vues. Et ce qui compte le plus pour moi, c'est que les probabilités soient justes (la log loss), pas seulement le favori.</p></div>
+  <div class="qa"><div class="q">Quelle a été la plus grande difficulté ?</div>
+    <p class="a">Deux exemples. Technique : la NBA bloque les serveurs, donc mon API ne pouvait pas récupérer les données ; j'ai déplacé la récupération sur mon PC, qui envoie les fichiers au serveur chaque jour. Data : garantir que l'API calcule exactement les mêmes variables qu'à l'entraînement ; j'ai mis toutes les formules dans un seul fichier partagé et écrit un script de contrôle.</p></div>
+
+  <div class="qa-group">Machine Learning</div>
+  <div class="qa"><div class="q">Explique le Machine Learning à quelqu'un qui n'y connaît rien.</div>
+    <p class="a">Au lieu d'écrire les règles moi-même, je montre à l'ordinateur 12 000 matchs passés avec leur résultat. Il trouve tout seul quelles statistiques comptent et combien. Ensuite, il applique ce qu'il a appris aux matchs à venir.</p></div>
+  <div class="qa"><div class="q">Quelle variable compte le plus ?</div>
+    <p class="a">L'écart d'Elo entre les deux équipes : environ 59 % du poids du modèle. Il tient compte de la force des adversaires, ce que ne fait pas un simple pourcentage de victoires.</p></div>
+  <div class="qa"><div class="q">Comment fonctionne ton Elo ?</div>
+    <p class="a">Chaque équipe a une note. Après un match, le gagnant prend des points au perdant, plus s'il était outsider et s'il gagne largement. L'équipe à domicile a un bonus de 40 points, et les notes reviennent à mi-chemin vers la moyenne entre deux saisons. J'ai choisi ces réglages parmi 396 combinaisons testées.</p></div>
+  <div class="qa"><div class="q">Pourquoi une régression logistique plutôt que XGBoost ?</div>
+    <p class="a">Je les ai comparés sur les mêmes matchs. La régression logistique donne de meilleures probabilités, de façon nette et sur les 5 saisons. Les relations sont presque linéaires, donc XGBoost n'apporte rien. Et elle s'explique exactement. J'utilise quand même XGBoost pour les minutes des joueurs, où il est meilleur.</p></div>
+  <div class="qa"><div class="q">Qu'est-ce que la fuite de données ? Comment l'as-tu évitée ?</div>
+    <p class="a">C'est utiliser une information qu'on n'aurait pas eue au moment de prédire, par exemple des statistiques du match lui-même. J'utilise <code>shift(1)</code> pour ne prendre que les matchs d'avant, une liste blanche de colonnes, une évaluation dans l'ordre du temps, et un script qui vérifie qu'en changeant le résultat d'un match, ses variables ne bougent pas.</p></div>
+  <div class="qa"><div class="q">Comment as-tu évalué ton modèle ? Pourquoi pas un découpage aléatoire ?</div>
+    <p class="a">En walk-forward : chaque saison est prédite par un modèle entraîné uniquement sur les saisons d'avant. Un découpage aléatoire mélangerait passé et futur, et le résultat serait trop optimiste. C'est aussi ce qui m'a montré que mon premier chiffre, 69 % sur une seule saison, surestimait la réalité.</p></div>
+  <div class="qa"><div class="q">C'est quoi la log loss ? Pourquoi pas seulement la précision ?</div>
+    <p class="a">La log loss mesure la qualité des probabilités : elle punit fort un modèle sûr de lui qui se trompe. La précision ne voit pas la différence entre 51 % et 90 %. Comme le site affiche des probabilités, elles doivent être justes.</p></div>
+  <div class="qa"><div class="q">Comment sais-tu qu'une amélioration est réelle ?</div>
+    <p class="a">Je compare l'ancienne et la nouvelle version sur les mêmes matchs, et je calcule un intervalle de confiance par bootstrap. Je garde le changement seulement si tout l'intervalle montre une amélioration. Plusieurs idées ont été écartées ainsi.</p></div>
+  <div class="qa"><div class="q">Raconte un essai qui n'a pas marché.</div>
+    <p class="a">La fatigue des déplacements : distance parcourue, décalage horaire, nombre de matchs sur 4 jours. Sur les saisons de réglage, une variante semblait aider, mais pas sur les saisons de confirmation. Je ne l'ai pas gardée. Les jours de repos captaient déjà l'essentiel.</p></div>
+  <div class="qa"><div class="q">Qu'est-ce que le surapprentissage ?</div>
+    <p class="a">Quand le modèle apprend par cœur ses exemples, y compris le hasard, et généralise mal. Je l'évite avec un modèle simple, peu de variables, et l'arrêt précoce pour XGBoost.</p></div>
+  <div class="qa"><div class="q">Comment gères-tu les blessures ?</div>
+    <p class="a">Je compare la force des joueurs du dernier match à la force habituelle de l'équipe : ça repère les absents. Limite assumée : un joueur qui revient de blessure est encore compté absent, car le rapport officiel n'est fiable qu'une demi-heure avant le match.</p></div>
+  <div class="qa"><div class="q">Comment prédis-tu le score ?</div>
+    <p class="a">Le total vient du rythme et de l'efficacité des deux équipes. L'écart est déduit de la probabilité de victoire avec une loi normale : le favori est donc toujours devant. Il y a une fourchette à 80 %, vérifiée sur les données : elle contient le vrai score 81 fois sur 100.</p></div>
+
+  <div class="qa-group">Technique</div>
+  <div class="qa"><div class="q">Qu'est-ce qu'une API REST ?</div>
+    <p class="a">Une interface qui permet à un programme d'en interroger un autre par HTTP. Chaque ressource a une adresse, et on utilise des verbes comme GET. Mon site demande par exemple <code>/games/today?date=…</code> et reçoit du JSON.</p></div>
+  <div class="qa"><div class="q">Pourquoi FastAPI ?</div>
+    <p class="a">Mon modèle est en Python, donc l'API peut le charger directement. FastAPI est simple, rapide, vérifie les paramètres et génère une documentation automatique.</p></div>
+  <div class="qa"><div class="q">Comment l'API calcule-t-elle une prédiction ?</div>
+    <p class="a">Elle lit l'état des deux équipes dans un fichier mis à jour chaque jour, calcule les 12 variables avec le même code qu'à l'entraînement, puis le modèle donne la probabilité. Le modèle est chargé une seule fois, donc la réponse est quasi instantanée.</p></div>
+  <div class="qa"><div class="q">Qu'est-ce qu'un venv ? Pourquoi l'utiliser ?</div>
+    <p class="a">Un environnement Python isolé, propre au projet. Chaque projet garde ses versions de bibliothèques sans gêner les autres, et <code>requirements.txt</code> permet de tout réinstaller à l'identique, par exemple sur le serveur.</p></div>
+  <div class="qa"><div class="q">Qu'est-ce que CORS ?</div>
+    <p class="a">Une règle de sécurité du navigateur : un site ne peut pas interroger une autre origine sans son accord. En développement, mon site (port 3000) et mon API (port 8000) sont deux origines, donc l'API autorise explicitement le site. En production, tout est sur le même domaine.</p></div>
+  <div class="qa"><div class="q">Pourquoi Next.js, et pourquoi un export statique ?</div>
+    <p class="a">Next.js structure le projet React (une page par dossier) et optimise le site. L'export statique produit de simples fichiers : pas de serveur Node.js à faire tourner, donc moins de risques et aucune mémoire utilisée sur le serveur.</p></div>
+  <div class="qa"><div class="q">Pourquoi pas de base de données ?</div>
+    <p class="a">À cette échelle (12 000 matchs, 30 équipes), des fichiers CSV et JSON suffisent et évitent un logiciel de plus à gérer. Le schéma d'une base PostgreSQL est prêt si le projet grandit, par exemple pour garder l'historique des prédictions.</p></div>
+  <div class="qa"><div class="q">Qu'as-tu fait pour l'accessibilité ?</div>
+    <p class="a">Contrastes au niveau AAA vérifiés par un script, navigation complète au clavier, un tableau de données pour chaque graphique, et des animations réduites si l'utilisateur le demande.</p></div>
+  <div class="qa"><div class="q">Comment le site est-il mis en ligne et sécurisé ?</div>
+    <p class="a">Sur un VPS OVH. Caddy reçoit les visites en HTTPS et sert le site statique. L'API tourne comme un service systemd enfermé : pas d'accès à Internet, fichiers en lecture seule, mémoire limitée. Seul Caddy peut lui parler.</p></div>
+  <div class="qa"><div class="q">As-tu écrit des tests ?</div>
+    <p class="a">Il n'y a pas encore de suite de tests automatiques classique. Mais un script de contrôle vérifie l'absence de fuite de données et que l'API calcule comme l'entraînement, et je l'ai vérifié capable d'échouer en introduisant volontairement des erreurs. Ajouter des tests avec pytest fait partie de mes prochaines étapes.</p></div>
+
+  <div class="qa-group">Recul</div>
+  <div class="qa"><div class="q">Quelles sont les limites de ton projet ?</div>
+    <p class="a">Les absences sont déduites du dernier match, pas du rapport officiel. En début de saison, le modèle s'appuie surtout sur l'Elo. Le score reste un ordre de grandeur (±15 points). Et la mise à jour dépend de mon PC allumé.</p></div>
+  <div class="qa"><div class="q">Que ferais-tu ensuite ?</div>
+    <p class="a">Une base de données pour garder l'historique des prédictions et les comparer aux résultats, des tests automatiques, l'intégration du rapport officiel des blessures, et les matchs sur terrain neutre (Paris, Mexico), aujourd'hui absents de l'historique.</p></div>
+  <div class="qa"><div class="q">As-tu utilisé l'IA pour coder ?</div>
+    <p class="a">Conseil : sois transparent, c'est une question de plus en plus fréquente. L'important est de montrer que tu as gardé la main : tu as fixé les objectifs, pris les décisions (le modèle mis en ligne, garder les matchs de présaison avec un badge, la fourchette à 80 %, les statistiques de joueurs à afficher), vérifié les résultats, et tu sais expliquer chaque partie. Exemple : « Oui, je me suis servi d'un assistant de code comme d'un binôme. Les choix et les vérifications étaient les miens, et je peux expliquer chaque partie du projet. »</p></div>
+</section>
+
+<!-- ============================ 17. GLOSSAIRE ============================ -->
+<section class="chap newpage" id="c17">
+  <h1><span class="num">17</span>Glossaire</h1>
+  <div class="gloss">
+    <p><b>Accuracy (précision)</b> : part des matchs dont le vainqueur est bien prédit.</p>
+    <p><b>API</b> : porte d'entrée par laquelle un programme demande des données ou des actions à un autre.</p>
+    <p><b>App Router</b> : système de Next.js où chaque dossier de <code>src/app/</code> devient une page.</p>
+    <p><b>Arbre de décision</b> : suite de questions oui / non qui mène à une prédiction.</p>
+    <p><b>Arrêt précoce (early stopping)</b> : on arrête d'entraîner quand l'erreur ne baisse plus sur des données mises de côté.</p>
+    <p><b>Back-end</b> : la partie serveur, invisible pour l'utilisateur (ici l'API).</p>
+    <p><b>Back-to-back</b> : deux matchs deux jours de suite.</p>
+    <p><b>Baseline</b> : le modèle le plus simple possible, à battre. Ici « le domicile gagne toujours ».</p>
+    <p><b>Biais (intercept)</b> : le terme constant d'une régression logistique, le point de départ avant les variables.</p>
+    <p><b>Bibliothèque</b> : code réutilisable écrit par d'autres (pandas, scikit-learn).</p>
+    <p><b>Boosting</b> : construire des modèles l'un après l'autre, chacun corrigeant les erreurs des précédents.</p>
+    <p><b>Bootstrap</b> : tirer au hasard des échantillons, avec remise, pour mesurer l'incertitude d'un résultat.</p>
+    <p><b>Boxscore</b> : les statistiques d'une équipe ou d'un joueur sur un match (tirs, rebonds…).</p>
+    <p><b>Brier (score de)</b> : moyenne de (probabilité − résultat)². Plus bas = mieux.</p>
+    <p><b>Build</b> : construction de la version finale du site, optimisée pour la mise en ligne.</p>
+    <p><b>Calibration</b> : accord entre les probabilités annoncées et les fréquences réelles.</p>
+    <p><b>Cible (target)</b> : ce que le modèle doit prédire (ici <code>home_win</code>).</p>
+    <p><b>Classification</b> : prédire une catégorie (victoire ou défaite).</p>
+    <p><b>Coefficient</b> : poids appris par le modèle pour une variable.</p>
+    <p><b>Commit</b> : une version du code enregistrée dans Git, avec un message.</p>
+    <p><b>Composant</b> : brique réutilisable d'une interface React.</p>
+    <p><b>CORS</b> : règle du navigateur qui demande l'accord d'une API avant qu'un site d'une autre origine l'interroge.</p>
+    <p><b>CSV</b> : tableau stocké en texte, colonnes séparées par des virgules.</p>
+    <p><b>DataFrame</b> : tableau de pandas, avec des lignes et des colonnes nommées.</p>
+    <p><b>Décorateur</b> : en Python, ligne en <code>@…</code> au-dessus d'une fonction qui lui ajoute un comportement (ici, en faire une route).</p>
+    <p><b>Déploiement</b> : mettre une version du projet en ligne.</p>
+    <p><b>Écart-type</b> : mesure de la dispersion des valeurs autour de la moyenne.</p>
+    <p><b>Elo</b> : note de force qui évolue après chaque match selon le résultat et la force de l'adversaire.</p>
+    <p><b>Endpoint (route)</b> : une adresse précise de l'API, comme <code>/games/today</code>.</p>
+    <p><b>Entraînement (fit)</b> : étape où le modèle apprend à partir des exemples.</p>
+    <p><b>Export statique</b> : site produit sous forme de simples fichiers, sans serveur applicatif.</p>
+    <p><b>Feature (variable)</b> : information connue avant le match, donnée au modèle.</p>
+    <p><b>Feature engineering</b> : créer des variables utiles à partir des données brutes.</p>
+    <p><b>Fonction pure</b> : fonction sans effet de bord, qui donne toujours la même sortie pour la même entrée.</p>
+    <p><b>Front-end</b> : la partie visible, dans le navigateur (ici le site Next.js).</p>
+    <p><b>Fuite de données (data leakage)</b> : utiliser par erreur une information qui n'est pas connue au moment de prédire.</p>
+    <p><b>Game Score</b> : formule qui résume le match d'un joueur en un nombre.</p>
+    <p><b>Git / GitHub</b> : historique du code / site qui héberge les dépôts Git.</p>
+    <p><b>Hook</b> : fonction React commençant par <code>use</code> (<code>useState</code>, <code>useEffect</code>).</p>
+    <p><b>HTTP / HTTPS</b> : protocole du web / sa version chiffrée.</p>
+    <p><b>Hyperparamètre</b> : réglage choisi avant l'entraînement (profondeur des arbres, K de l'Elo).</p>
+    <p><b>Intervalle de confiance</b> : plage où se trouve probablement la vraie valeur (ici à 95 %).</p>
+    <p><b>JSON</b> : format texte en paires clé / valeur, utilisé entre l'API et le site.</p>
+    <p><b>Log loss</b> : mesure de la qualité des probabilités, qui punit les erreurs trop confiantes. Plus bas = mieux.</p>
+    <p><b>Log-odds</b> : le score z d'une régression logistique, avant la sigmoïde.</p>
+    <p><b>Loi normale</b> : la « courbe en cloche » des statistiques.</p>
+    <p><b>MAE</b> : erreur absolue moyenne, l'écart moyen entre prédiction et réalité.</p>
+    <p><b>Médiane</b> : valeur du milieu quand on trie les valeurs.</p>
+    <p><b>Modèle</b> : la formule apprise qui transforme les variables en prédiction.</p>
+    <p><b>Net Rating</b> : points marqués moins encaissés, pour 100 possessions.</p>
+    <p><b>npm</b> : gestionnaire de paquets de JavaScript.</p>
+    <p><b>pandas / numpy</b> : bibliothèques Python pour les tableaux / pour le calcul numérique.</p>
+    <p><b>pip</b> : gestionnaire de paquets de Python.</p>
+    <p><b>Pipeline</b> : chaîne d'étapes (préparation puis modèle) appliquées toujours dans le même ordre.</p>
+    <p><b>Possession</b> : une action d'attaque d'une équipe.</p>
+    <p><b>Probabilité</b> : chance qu'un événement arrive, entre 0 et 100 %.</p>
+    <p><b>Props</b> : paramètres transmis à un composant React.</p>
+    <p><b>Régression</b> : prédire un nombre (des minutes, des points).</p>
+    <p><b>Régression logistique</b> : modèle de classification ; somme pondérée des variables passée dans une sigmoïde.</p>
+    <p><b>REST</b> : convention d'API : une adresse par ressource, des verbes HTTP.</p>
+    <p><b>Reverse proxy</b> : serveur placé devant les autres, qui reçoit les visites et les aiguille (ici Caddy).</p>
+    <p><b>scikit-learn</b> : bibliothèque Python de Machine Learning classique.</p>
+    <p><b>Sigmoïde</b> : fonction qui transforme n'importe quel nombre en valeur entre 0 et 1.</p>
+    <p><b>SSH / scp</b> : connexion sécurisée à un serveur / copie de fichiers par cette connexion.</p>
+    <p><b>StandardScaler</b> : ramène chaque variable à une moyenne de 0 et un écart-type de 1.</p>
+    <p><b>Surapprentissage (overfitting)</b> : modèle qui apprend par cœur et généralise mal.</p>
+    <p><b>systemd</b> : gestionnaire de services de Linux (démarre, relance, isole l'API).</p>
+    <p><b>Tailwind CSS</b> : style par petites classes utilitaires dans le HTML.</p>
+    <p><b>uvicorn</b> : serveur qui fait tourner une application FastAPI.</p>
+    <p><b>venv</b> : environnement Python isolé, propre à un projet.</p>
+    <p><b>VPS</b> : serveur privé virtuel, un ordinateur loué en ligne.</p>
+    <p><b>Walk-forward</b> : évaluation où chaque période est prédite avec les seules données du passé.</p>
+    <p><b>XGBoost</b> : bibliothèque d'arbres de décision boostés.</p>
+  </div>
+</section>
+
+</body>
+</html>

@@ -113,7 +113,9 @@ nba-predictor/
 ├── docs/
 │   ├── architecture.md             # FAIT (2026-10-14) — pipeline, choix techniques, pièges, déploiement
 │   ├── deploiement.md              # FAIT (2026-10-14) — guide d'exploitation : redéployer, retour arrière, surveiller
-│   └── screenshots/                # captures du README (accueil, fiche match, modèle ; clair/sombre), VERSIONNÉES
+│   ├── screenshots/                # captures du README (accueil, fiche match, modèle ; clair/sombre), VERSIONNÉES
+│   ├── preparation-entretien.pdf   # FAIT (2026-10-21) — explication du projet pour préparer les entretiens de l'utilisateur (28 pages, questions, glossaire)
+│   └── entretien/                  # source du PDF : source.html + build.py (Chrome headless ; `python docs/entretien/build.py`, sommaire recalculé si pypdfium2 est installé). Chiffres à mettre à jour à la main si le modèle change
 │
 └── README.md                       # FAIT (2026-10-14)
 ```
