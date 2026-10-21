@@ -147,6 +147,12 @@ function MatchDetail({ game }) {
                   <span className="text-text-2">–</span>{" "}
                   {int(prediction.predicted_away_score)}
                 </p>
+                <ScoreRanges
+                  prediction={prediction}
+                  home={home}
+                  away={away}
+                  colors={colors}
+                />
               </>
             ) : (
               <p className="max-w-56 text-center text-text-2">
@@ -225,9 +231,10 @@ function MatchDetail({ game }) {
       <Section title="À savoir" index={5}>
         <ul className="list-disc space-y-2 pl-5 text-sm text-text-2">
           <li>
-            Le modèle prédit uniquement le vainqueur. Le score est une
-            estimation simple, tirée de l&apos;attaque et de la défense récentes
-            des deux équipes.
+            Le score s&apos;appuie sur le rythme et l&apos;efficacité des deux
+            équipes (pour le total de points) et sur la probabilité de
+            victoire (pour l&apos;écart). Il reste approximatif : la fourchette
+            contient le vrai score de chaque équipe environ 8 fois sur 10.
           </li>
           <li>
             Les absences sont déduites du dernier match joué, pas du rapport
@@ -256,6 +263,38 @@ function MatchDetail({ game }) {
           )}
         </ul>
       </Section>
+    </div>
+  );
+}
+
+// Fourchette à 80 % de chaque score (score_model.interval de l'API), dans
+// l'ordre du score affiché au-dessus : domicile puis extérieur.
+function ScoreRanges({ prediction, home, away, colors }) {
+  const ranges = [
+    ["home", home, prediction.predicted_home_score_range, colors.home],
+    ["away", away, prediction.predicted_away_score_range, colors.away],
+  ];
+  if (ranges.some(([, , range]) => !range)) return null; // API d'avant le 2026-10-21
+  return (
+    <div className="mt-2 text-center text-xs text-text-2">
+      <p>Fourchette à 80&nbsp;%</p>
+      <p className="mt-1 flex items-center justify-center gap-3 tabular-nums">
+        {ranges.map(([side, team, [low, high], color]) => (
+          <span key={side} className="inline-flex items-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className="h-2.5 w-2.5 rounded-sm"
+              style={fillStyle(color)}
+            />
+            <span aria-hidden="true">
+              {low}–{high}
+            </span>
+            <span className="sr-only">
+              {team.name} : entre {low} et {high} points
+            </span>
+          </span>
+        ))}
+      </p>
     </div>
   );
 }

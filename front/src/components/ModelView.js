@@ -215,14 +215,16 @@ function ModelDetail({ m }) {
   );
 }
 
-// Erreur moyenne du score estimé (walk-forward), comparée à l'ancienne
-// méthode et à la référence naïve. score.evaluation.methods : model,
+// Erreur moyenne du score estimé (walk-forward), comparée à la méthode
+// précédente (moyennes des 10 derniers matchs) et à la référence naïve,
+// et couverture réelle de la fourchette. score.evaluation.methods : model,
 // previous, naive (data/models/score_model.py).
 function ScoreCard({ score, period }) {
   const methods = Object.fromEntries(
     score.evaluation.methods.map((x) => [x.key, x]),
   );
   const { model, previous, naive } = methods;
+  const interval = score.evaluation.interval; // absent des métriques d'avant le 2026-10-21
   const stats = [
     { label: "Par équipe", key: "mae_team" },
     { label: "Sur l'écart", key: "mae_margin" },
@@ -234,7 +236,7 @@ function ScoreCard({ score, period }) {
       title="Score estimé"
       subtitle={`Écart moyen entre le score estimé et le score réel, saisons ${period} (prédites sans les avoir vues). Plus bas = mieux.`}
     >
-      <dl className="grid gap-3 sm:grid-cols-3">
+      <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((s) => (
           <div key={s.key} className="rounded-xl border border-line bg-surface p-4">
             <dt className="text-sm text-text-2">{s.label}</dt>
@@ -242,21 +244,38 @@ function ScoreCard({ score, period }) {
               {num(model[s.key])} pts
             </dd>
             <dd className="text-sm text-text-2">
-              ancienne méthode {num(previous[s.key])} · naïf{" "}
+              méthode précédente {num(previous[s.key])} · naïf{" "}
               {num(naive[s.key])}
             </dd>
           </div>
         ))}
+        {interval && (
+          <div className="rounded-xl border border-line bg-surface p-4">
+            <dt className="text-sm text-text-2">
+              Fourchette à {pct(interval.level)}
+            </dt>
+            <dd className="mt-1 text-3xl font-bold tracking-tight">
+              {pct1(interval.coverage)}
+            </dd>
+            <dd className="text-sm text-text-2">
+              des vrais scores dedans (±{int(score.interval.half_width)} pts)
+            </dd>
+          </div>
+        )}
       </dl>
       <p className="mt-5 max-w-3xl text-sm leading-relaxed text-text-2">
-        Le total vient des points marqués et encaissés par les deux équipes
-        sur leurs {int(score.window)} derniers matchs. L&apos;écart est déduit
-        de la probabilité de victoire : plus elle s&apos;éloigne de 50 %, plus
-        l&apos;écart grandit (jusqu&apos;à une douzaine de points). Le favori
-        du modèle est donc toujours devant, alors que l&apos;ancienne méthode,
-        qui estimait chaque équipe séparément, désignait un autre vainqueur
-        dans {pct(previous.winner_mismatch)} des matchs. «&nbsp;Naïf&nbsp;» :
-        le score moyen de la saison précédente pour tous les matchs.
+        Le total de points vient de deux notes par équipe, mises à jour après
+        chaque match comme l&apos;Elo : son rythme (nombre de possessions de
+        ses matchs) et les points marqués par possession dans ses matchs,
+        au-dessus ou en dessous de la moyenne de la ligue. Elles tiennent compte
+        des adversaires rencontrés, contrairement à la méthode précédente
+        (moyennes brutes des 10 derniers matchs). L&apos;écart est déduit de
+        la probabilité de victoire : plus elle s&apos;éloigne de 50 %, plus
+        l&apos;écart grandit, et le favori du modèle est toujours devant.
+        {interval &&
+          ` La fourchette affichée sur chaque match (±${int(score.interval.half_width)} points autour de chaque score) est réglée pour contenir le vrai score ${pct(interval.level)} du temps ; sur les saisons testées, c'est le cas ${pct1(interval.coverage)} du temps.`}{" "}
+        «&nbsp;Naïf&nbsp;» : le score moyen de la saison précédente pour tous
+        les matchs.
       </p>
     </Card>
   );
